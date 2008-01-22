@@ -33,16 +33,16 @@ DAT
         '    if you have more than one device using this code on a local network.
         ' ** If you plan on commercial deployment, you must purchase MAC address
         '    groups from IEEE or another organization.
-        local_macaddr   byte    $10, $00, $00, $00, $00, $01
+        local_macaddr   byte    $10, $00, $00, $00, $00, $02
          
         ' ** The following are tcp stack ip addresses.  It is critical that the
         '    device IP address is unique and on the same subnet when used on a
         '    local network.
                         long    0                       ' long alignment for addresses, don't remove
-        ip_addr         byte    192, 168, 1, 228            ' device's ip address
+        ip_addr         byte    192, 168, 0, 228            ' device's ip address
         ip_subnet       byte    255, 255, 255, 0        ' network subnet
-        ip_gateway      byte    192, 168, 1, 1          ' network gateway (router)
-        ip_dns          byte    192, 168, 1, 1          ' network dns        
+        ip_gateway      byte    192, 168, 0, 1          ' network gateway (router)
+        ip_dns          byte    192, 168, 0, 1          ' network dns        
 
 OBJ
   nic : "driver_enc28j60"
