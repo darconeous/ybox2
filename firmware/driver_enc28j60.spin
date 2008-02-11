@@ -1,14 +1,9 @@
-{{        
-  Microchip ENC28J60 Ethernet NIC / MAC Driver
-  $Id: driver_enc28j60.spin 301 2007-10-21 21:40:24Z hpham $
-  --------------------------------------------
-  Ported to SPIN by Harrison Pham
-
-  Driver Framework / API derived from EDTP Framethrower Fundamental Driver by Fred Eady
-  Constant names / Theoretical Code Logic derived from Microchip Technology, Inc.'s enc28j60.c / enc28j60.h files
-}}
-
 {{
+  ENC28J60 Ethernet NIC / MAC Driver
+  ----------------------------------
+  
+  Copyright (C) 2006 - 2007 Harrison Pham
+
   This file is part of PropTCP.
    
   PropTCP is free software; you can redistribute it and/or modify
@@ -23,54 +18,54 @@
    
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+  ----
+  
+  Driver Framework / API derived from EDTP Framethrower Fundamental Driver by Fred Eady
+  Constant names / Theoretical Code Logic derived from Microchip Technology, Inc.'s enc28j60.c / enc28j60.h files
 }}
 
 CON
+  version = 3     ' major version
+  release = 2     ' minor version
 
-  version = 3
+OBJ
+  spi : "SPI_Engine"
 
 CON
+' ***************************************
+' **       ENC28J60 SRAM Defines       **
+' ***************************************
+  ' Silicon Revision
+  silicon_rev = 4                               ' required silicon revision (current is B5)
 
-  ' Silicon Revision (used for revision checks, doesn't change operation of code)
-  silicon_rev = %0000_0100      ' required silicon revision (current is B5)
-
-  ' ENC28J60 SRAM usage constants (you prolly don't need to change these)               
-  MAXFRAME = 1518               ' 6 (src addr) + 6 (dst addr) + 2 (type) + 1500 (data) + 4 (FCS CRC) = 1518 bytes
-  TX_BUFFER_SIZE = 1518 '1024
+  ' ENC28J60 SRAM Usage Constants              
+  MAXFRAME = 1518                               ' 6 (src addr) + 6 (dst addr) + 2 (type) + 1500 (data) + 4 (FCS CRC) = 1518 bytes
+  TX_BUFFER_SIZE = 1518
   
   TXSTART = 8192 - (TX_BUFFER_SIZE + 8)
   TXEND = TXSTART + (TX_BUFFER_SIZE + 8)
   RXSTART = $0000
-  RXSTOP = (TXSTART - 2) | $0001         ' must be odd (B5 Errata)
+  RXSTOP = (TXSTART - 2) | $0001                ' must be odd (B5 Errata)
   RXSIZE = (RXSTOP - RXSTART + 1)
 
 DAT
-        ' ** This is the default MAC address used by this driver.  The parent object
-        '    can override this by passing a pointer to a new MAC address in the public
-        '    start() method.  It is recommend that this is done to provide a level of
-        '    abstraction and makes tcp stack design easier.
-        ' ** This is the ethernet MAC address, it is critical that you change this
-        '    if you have more than one device using this code on a local network.
-        ' ** If you plan on commercial deployment, you must purchase MAC address
-        '    groups from IEEE or some other standards organization.
-        eth_mac         byte    $10, $00, $00, $00, $00, $01
+' ***************************************
+' **    MAC Address Vars / Defaults    **
+' ***************************************
+  ' ** This is the default MAC address used by this driver.  The parent object
+  '    can override this by passing a pointer to a new MAC address in the public
+  '    start() method.  It is recommend that this is done to provide a level of
+  '    abstraction and makes tcp stack design easier.
+  ' ** This is the ethernet MAC address, it is critical that you change this
+  '    if you have more than one device using this code on a local network.
+  ' ** If you plan on commercial deployment, you must purchase MAC address
+  '    groups from IEEE or some other standards organization.
+  eth_mac         byte    $10, $00, $00, $00, $00, $01
 
-OBJ                                                   
-
-  spi : "SPI_Engine"
-  
-{VAR
-
-  ' Global Variables for packet tracking and ENC28J60 communication
-  byte cs, sck, si, so, int     ' pins
-  byte packet[MAXFRAME]         ' ethernet buffer
-  byte packetheader[6]
-  word rxlen                    ' rx length
-
-  word tx_end                   ' for write_frame}
-
-DAT
-
+' ***************************************
+' **         Global Variables          **
+' ***************************************
   rxlen           word 0
   tx_end          word 0
  
@@ -79,8 +74,10 @@ DAT
   si              byte 0
   so              byte 0
   int             byte 0
- 
-  packetheader    byte 0,0,0,0,0,0
+                  
+  packetheader    byte 0[6]
+
+  packet          byte 0[MAXFRAME]
 
 PUB start(i_cs, i_sck, i_si, i_so, i_int, xtalout, macptr)
 '' Starts the driver (uses 1 cog for spi engine)
@@ -105,9 +102,9 @@ PUB start(i_cs, i_sck, i_si, i_so, i_int, xtalout, macptr)
   if xtalout > -1
     SynthFreq(xtalout, 25_000_000)      'determine ctr and frq for xtalout
 
-  ' If a MAC address pointer is provided (addr > 0) then copy it into
+  ' If a MAC address pointer is provided (addr > -1) then copy it into
   ' the MAC address array (this kind of wastes space, but simplifies usage).
-  if macptr > 0
+  if macptr > -1
     bytemove(@eth_mac, macptr, 6)
   
   delay_ms(50)
@@ -348,7 +345,40 @@ PUB send_frame
     if p_send_frame             ' send packet, if successful then quit retry loop
       quit          
     delay_ms(1)
+PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
+  crc_start := TXSTART + 14
+  crc_end := TXSTART + 14 + 12
 
+  banksel(EDMASTL)
+  wr_reg(EDMASTL, crc_start)
+  wr_reg(EDMASTH, crc_start >> 8)
+
+  banksel(EDMANDL)
+  wr_reg(EDMANDL, crc_end)
+  wr_reg(EDMANDH, crc_end >> 8)
+  
+  bfs_reg(ECON1, ECON1_CSUMEN)
+  bfs_reg(ECON1, ECON1_DMAST)
+
+  i:=0
+
+  delay_us(150)
+
+  if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
+    return 0
+  crc_end := crc_end - 1
+
+  banksel(EDMACSL)
+  crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
+  
+  ' Now we write out the checksum back to the device
+  banksel(EWRPTL)
+  wr_reg(EWRPTL, crc_end)
+  wr_reg(EWRPTH, crc_end >> 8)
+  wr_sram(crc) 
+  wr_sram(crc>>8) 
+  return 1
+  
 PRI p_send_frame | i, eirval
 ' Sends the frame
   banksel(ETXSTL)
@@ -454,32 +484,10 @@ PRI fraction(a, b, shift) : f
       f++           
     a <<= 1
 
-DAT
-
-packet  LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    ' This is the packet byte array
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    ' It is declared as a long in order to reduce the source file size
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    ' 1 long = 4 bytes
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    ' Since we want 1518 bytes (MAXFRAME constant), we use 
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    '  20 longs x 19 lines = 380 longs x 4 = 1520 bytes 
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    ' We do loose 2 bytes by going this route, but it's not a huge
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0    '  loss since it does give us aligned access if we ever need it
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        LONG 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0             
-
 CON
-  ' ENC28J60 Communication and Register Layout
-  ' These contants should never change, so leave this alone!
-
+' ***************************************
+' **    ENC28J60 Control Constants     **
+' ***************************************
   ' ENC28J60 opcodes (OR with 5bit address)
   cWCR = %010 << 5              ' write control register command
   cBFS = %100 << 5              ' bit field set command
@@ -495,10 +503,9 @@ CON
   ' Packet header format (tail of the receive packet in the ENC28J60 SRAM)
   #0,nextpacket_low,nextpacket_high,rec_bytecnt_low,rec_bytecnt_high,rec_status_low,rec_status_high
 
-CON
-  ' ENC28J60 Register Defines
-  ' These shouldn't change, so don't touch this either...
-  
+' ***************************************
+' **     ENC28J60 Register Defines     **
+' ***************************************
   ' Bank 0 registers --------
   ERDPTL = $00
   ERDPTH = $01

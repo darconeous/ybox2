@@ -51,7 +51,7 @@ PUB init
 
   error:=ir.init(15, $093A, 300, 1)
   
-  dira[8]:=1
+  'dira[8]:=1
   
   dira[0]:=0
 

@@ -33,16 +33,16 @@ DAT
         '    if you have more than one device using this code on a local network.
         ' ** If you plan on commercial deployment, you must purchase MAC address
         '    groups from IEEE or another organization.
-        local_macaddr   byte    $10, $00, $00, $00, $00, $02
+        local_macaddr   byte    $10, $00, $00, $00, $00, $01
          
         ' ** The following are tcp stack ip addresses.  It is critical that the
         '    device IP address is unique and on the same subnet when used on a
         '    local network.
                         long    0                       ' long alignment for addresses, don't remove
-        ip_addr         byte    192, 168, 0, 228            ' device's ip address
+        ip_addr         byte    0, 0, 0, 0            ' device's ip address
         ip_subnet       byte    255, 255, 255, 0        ' network subnet
-        ip_gateway      byte    192, 168, 0, 1          ' network gateway (router)
-        ip_dns          byte    192, 168, 0, 1          ' network dns        
+        ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
+        ip_dns          byte    4, 2, 2, 4          ' network dns        
 
 OBJ
   nic : "driver_enc28j60"
@@ -108,6 +108,9 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
   pkt := nic.get_packetpointer
 
+  if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+    send_bootp_request
+    
   i := 0
   nic.banksel(nic#EPKTCNT)      ' select packet count bank
   repeat
@@ -117,7 +120,12 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
       nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
     ++i
-    if i > 10
+    if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+      if i > 5000
+        send_bootp_request
+        i := 0
+        nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
+    elseif i > 10
       ' perform send tick (occurs every 10 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
@@ -136,16 +144,19 @@ PRI service_packet
           $01 : handle_arp
           $02 : handle_arpreply
         '++count_arp
+  elseif ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+    if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00 AND BYTE[pkt][ip_proto] == PROT_UDP
+      handle_udp 
   else
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00
       if BYTE[pkt][ip_destaddr] == ip_addr[0] AND BYTE[pkt][constant(ip_destaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(ip_destaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(ip_destaddr + 3)] == ip_addr[3]
         case BYTE[pkt][ip_proto]
-          'PROT_ICMP : 'handle_ping
+          PROT_ICMP : \handle_ping
                       'ser.str(stk.GetLength(0, 0))
                       '++count_ping
           PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
                       '++count_tcp
-          'PROT_UDP :  ++count_udp
+          PROT_UDP :  \handle_udp
 
 ' *******************************
 ' ** Protocol Receive Handlers **
@@ -194,6 +205,128 @@ PRI handle_arp | i
 
   return nic.send_frame
 
+PRI send_bootp_request | i
+  nic.start_frame
+
+  ' destination mac address (broadcast address)
+  repeat i from 0 to 5
+    nic.wr_frame($FF)
+
+  ' source mac address
+  repeat i from 0 to 5
+    nic.wr_frame(local_macaddr[i])
+
+  nic.wr_frame($08)             ' IP packet
+  nic.wr_frame($00)
+
+  nic.wr_frame($45)        ' ip vesion and header size
+  
+  nic.wr_frame($00)        ' TOS
+  
+  nic.wr_frame($01)
+  nic.wr_frame($48)  ' IP Packet Length
+
+  ++pkt_id
+
+  nic.wr_frame(pkt_id >> 8)                                               ' Used for fragmentation
+  nic.wr_frame(pkt_id)
+
+  nic.wr_frame($40)  ' Don't fragment
+  nic.wr_frame($00)  ' frag stuff
+
+  nic.wr_frame($FF)  ' TTL
+  nic.wr_frame(PROT_UDP)  ' UDP
+
+  nic.wr_frame($00)
+  nic.wr_frame($00)  ' header checksum (Filled in by hardware)
+  
+
+  ' source IP address (all zeros
+  repeat i from 0 to 3
+    nic.wr_frame($00)
+
+  ' dest IP address (broadcast)
+  repeat i from 0 to 3
+    nic.wr_frame($FF)
+
+  nic.wr_frame(00)  ' Source Port
+  nic.wr_frame(68)  ' UDP
+
+  nic.wr_frame(00)  ' Dest Port
+  nic.wr_frame(67)  ' UDP
+
+  nic.wr_frame($01)
+  nic.wr_frame($34)  ' UDP packet Length
+
+
+  nic.wr_frame($00)
+  nic.wr_frame($00)  ' UDP checksum
+
+  nic.wr_frame($01) ' op (bootrequest)
+  nic.wr_frame($01) ' htype
+  nic.wr_frame($06) ' hlen
+  nic.wr_frame($00) ' hops
+
+  ' xid
+  nic.wr_frame($00)
+  nic.wr_frame($00)
+  nic.wr_frame(pkt_id >> 8)
+  nic.wr_frame(pkt_id)
+
+  nic.wr_frame($00) ' secs
+  nic.wr_frame($7F) ' secs
+
+  nic.wr_frame($00) ' padding
+  nic.wr_frame($00) ' padding
+
+  repeat i from 0 to 3
+    nic.wr_frame(ip_addr[i]) 'ciaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'yiaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'siaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'giaddr
+
+  ' source mac address
+  repeat i from 0 to 5
+    nic.wr_frame(local_macaddr[i])
+  repeat i from 0 to 9
+    nic.wr_frame(0)
+
+  repeat i from 0 to 63
+    nic.wr_frame(0) 'sname
+
+  repeat i from 0 to 127
+    nic.wr_frame(0) ' file
+  
+  ' DHCP Magic Cookie
+  nic.wr_frame($63)
+  nic.wr_frame($82)
+  nic.wr_frame($53)
+  nic.wr_frame($63)
+
+  ' DHCP Message Type
+  nic.wr_frame(53)
+  nic.wr_frame($01)
+  nic.wr_frame($01)
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  repeat i from 0 to 5
+    nic.wr_frame(local_macaddr[i])
+
+  ' End of vendor data
+  nic.wr_frame($FF)
+
+  repeat i from 0 to 46
+    nic.wr_frame(0) 'vend
+
+  nic.calc_frame_ip_checksum
+  return nic.send_frame
+
 PRI handle_arpreply | handle, handle_addr, ip, found
   ' Gets arp reply if it is a response to an ip we have
 
@@ -220,9 +353,33 @@ PRI handle_arpreply | handle, handle_addr, ip, found
     bytemove(handle_addr + sSrcMac, pkt + arp_shaddr, 6)
     BYTE[handle_addr + sConState] := SCONNECTING
 
-'PRI handle_ping
+PRI handle_ping
   ' Not implemented yet (save on space!)
   
+PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
+  ' Handles incoming UDP packets
+
+  srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
+  dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
+  srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
+
+  if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+    if dstport == 68 AND srcport == 67
+      ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
+      repeat i from 0 to 3
+        ip_addr[i] := BYTE[pkt][DHCP_yiaddr+i]
+
+      if BYTE[pkt][DHCP_giaddr]
+        repeat i from 0 to 3
+          ip_gateway[i] := BYTE[pkt][DHCP_giaddr+i]
+      else
+        repeat i from 0 to 3
+          ip_gateway[i] := BYTE[pkt][ip_srcaddr+i]
+      ' TODO: Real extraction of the gateway, netmask, etc...
+      
+      'if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+        ' this is a DHCP packet! We should send a request.
+        
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
   ' Handles incoming TCP packets
 
