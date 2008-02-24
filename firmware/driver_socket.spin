@@ -151,7 +151,7 @@ PRI service_packet
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00
       if BYTE[pkt][ip_destaddr] == ip_addr[0] AND BYTE[pkt][constant(ip_destaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(ip_destaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(ip_destaddr + 3)] == ip_addr[3]
         case BYTE[pkt][ip_proto]
-          PROT_ICMP : \handle_ping
+          PROT_ICMP : \handle_icmp
                       'ser.str(stk.GetLength(0, 0))
                       '++count_ping
           PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
@@ -205,7 +205,7 @@ PRI handle_arp | i
 
   return nic.send_frame
 
-PRI send_bootp_request | i
+PRI send_bootp_request | i, pkt_len
   nic.start_frame
 
   ' destination mac address (broadcast address)
@@ -223,6 +223,7 @@ PRI send_bootp_request | i
   
   nic.wr_frame($00)        ' TOS
   
+  pkt_len := $0148
   nic.wr_frame($01)
   nic.wr_frame($48)  ' IP Packet Length
 
@@ -325,13 +326,17 @@ PRI send_bootp_request | i
     nic.wr_frame(0) 'vend
 
   nic.calc_frame_ip_checksum
+
+  'UDP Checksum, but missing the pseudo ip appendage.
+  'Not a problem, because in UDP the checksum is optional.
+  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
   return nic.send_frame
 
 PRI handle_arpreply | handle, handle_addr, ip, found
   ' Gets arp reply if it is a response to an ip we have
 
   ip := (BYTE[pkt][arp_sipaddr] << 24) + (BYTE[pkt][constant(arp_sipaddr + 1)] << 16) + (BYTE[pkt][constant(arp_sipaddr + 2)] << 8) + (BYTE[pkt][constant(arp_sipaddr + 3)])
-
+  
   found := false
   if ip == conv_endianlong(LONG[@ip_gateway])
     ' find a handle that wants gateway mac
@@ -353,8 +358,47 @@ PRI handle_arpreply | handle, handle_addr, ip, found
     bytemove(handle_addr + sSrcMac, pkt + arp_shaddr, 6)
     BYTE[handle_addr + sConState] := SCONNECTING
 
-PRI handle_ping
-  ' Not implemented yet (save on space!)
+PRI handle_icmp | i,pkt_len
+    case BYTE[pkt][icmp_type]
+      8 : ' echo request
+        ++pkt_id
+
+        ' Reply to the same MAC
+        bytemove(pkt + enetpacketDest0, pkt + enetpacketSrc0, 6)
+        bytemove(pkt + enetpacketSrc0, @local_macaddr, 6)                             ' Set source mac address
+
+        ' Reply to the same IP
+        bytemove(pkt + ip_destaddr, pkt + ip_srcaddr, 4)
+        bytemove(pkt + ip_srcaddr, @ip_addr, 4)
+  
+        BYTE[pkt][ip_id] := pkt_id >> 8
+        BYTE[pkt][ip_id+1] := pkt_id
+
+        ' Zero out the header checksum (to be caculated in hardware)
+        BYTE[pkt][ip_hdr_cksum] := $0
+        BYTE[pkt][ip_hdr_cksum+1] := $0
+
+        BYTE[pkt][ip_ttl] := $ff ' reset the time to live
+
+        BYTE[pkt][icmp_type] := 0 'Set to echo reply
+
+        ' Zero out the ICMP checksum (to be calculated in hardware)
+        BYTE[pkt][icmp_cksum] := 0
+        BYTE[pkt][icmp_cksum+1] := 0
+        pkt_len := (BYTE[pkt+ip_pktlen]<<8)+BYTE[pkt+ip_pktlen+1]
+        
+        ' send the packet
+        nic.start_frame
+         
+        repeat i from 0 to pkt_len+14
+          nic.wr_frame(BYTE[pkt][i])
+         
+        nic.calc_frame_ip_checksum
+        nic.calc_checksum(icmp_type, icmp_type+pkt_len-20, icmp_cksum)
+
+        ' send the packet
+        nic.send_frame
+         
   
 PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
   ' Handles incoming UDP packets

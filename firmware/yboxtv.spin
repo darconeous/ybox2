@@ -49,8 +49,10 @@ PUB init
 
   subsys.StatusLoading
 
-  error:=ir.init(15, $093A, 300, 1)
+  'error:=ir.init(15, $093A, 300, 1)
+  error:=ir.init(15, 0, 300, 1)
   
+  ' Comment out following line to mute
   'dira[8]:=1
   
   dira[0]:=0

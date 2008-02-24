@@ -345,9 +345,13 @@ PUB send_frame
     if p_send_frame             ' send packet, if successful then quit retry loop
       quit          
     delay_ms(1)
+
 PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
-  crc_start := TXSTART + 14
-  crc_end := TXSTART + 14 + 12
+  return calc_checksum(14,14+20,14+20-10)
+  
+PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
+  crc_start += TXSTART
+  crc_end += TXSTART
 
   banksel(EDMASTL)
   wr_reg(EDMASTL, crc_start)
@@ -366,7 +370,7 @@ PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
 
   if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
     return 0
-  crc_end := crc_end - 1
+  crc_end := dest + TXSTART +1
 
   banksel(EDMACSL)
   crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
@@ -378,6 +382,7 @@ PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
   wr_sram(crc) 
   wr_sram(crc>>8) 
   return 1
+
   
 PRI p_send_frame | i, eirval
 ' Sends the frame
