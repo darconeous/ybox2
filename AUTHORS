@@ -1,0 +1,19 @@
+Authors and Contributors
+------------------------
+
+Robert Quattlebaum <darco@deepdarc.com>
+    * Original ybox2 schematic/layout
+
+Limor <limor@ladyada.net>
+    * Updated ybox2 layout (ybox2.1)
+
+Harrison Pham <harrison@harrisonpham.com>
+    * Original TCP/IP stack
+
+Tarikh Korula <tk@uncommonprojects.com>
+Josh Rooke-Ley <josh@uncommonprojects.com>
+    * Original ybox schematic/layout/software
+
+If you have made any significant contributions to this project and
+aren't listed here, please send an email to darco@deepdarc.com so
+that I can add you.
