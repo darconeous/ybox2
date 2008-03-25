@@ -27,13 +27,13 @@
 CON
   version = 1.3
   apiversion = 3
-
+  EEPROMPageSize = 128
 DAT
         ' ** This is the ethernet MAC address, it is critical that you change this
         '    if you have more than one device using this code on a local network.
         ' ** If you plan on commercial deployment, you must purchase MAC address
         '    groups from IEEE or another organization.
-        local_macaddr   byte    $10, $00, $00, $00, $00, $01
+        local_macaddr   byte    $10, $00, $00, $00, $00, $00
          
         ' ** The following are tcp stack ip addresses.  It is critical that the
         '    device IP address is unique and on the same subnet when used on a
@@ -49,6 +49,9 @@ OBJ
 
   'ser : "SerialMirror"
   'stk : "Stack Length"
+
+  random : "RealRandom"
+  eeprom : "Basic_I2C_Driver"
 
 VAR
   long stack[128]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
@@ -84,15 +87,37 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 
   stop
   'stk.Init(@stack, 128)
-  cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
 
+  ' If we don't have an explicit mac address set, we need to make one!
+  if local_macaddr[0]==$10 and !local_macaddr[1] and !local_macaddr[2] and !local_macaddr[3] and !local_macaddr[4] and !local_macaddr[5] 
+    generate_macaddr
+    save_settings
+    
+  cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
+  return cog
+  
 PUB stop
 '' Stop the driver
 
   if cog
     nic.stop                    ' stop nic driver (kills spi engine)
     cogstop(cog~ - 1)           ' stop the tcp engine
-
+PRI generate_macaddr
+  random.start
+  local_macaddr[0] := $10
+  local_macaddr[1] := random.random
+  local_macaddr[2] := random.random
+  local_macaddr[3] := random.random
+  local_macaddr[4] := random.random
+  local_macaddr[5] := random.random
+  random.stop
+PRI save_settings | addr
+  addr := @local_macaddr & %11111111_10000000
+  'addr := $0600
+  eeprom.Initialize(eeprom#BootPin)
+  if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, EEPROMPageSize*2)
+    abort FALSE
+  
 PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
   ' Start the ENC28J60 driver in a new cog
@@ -378,7 +403,7 @@ PRI handle_icmp | i,pkt_len
         BYTE[pkt][ip_hdr_cksum] := $0
         BYTE[pkt][ip_hdr_cksum+1] := $0
 
-        BYTE[pkt][ip_ttl] := $ff ' reset the time to live
+        'BYTE[pkt][ip_ttl] := $ff ' reset the time to live
 
         BYTE[pkt][icmp_type] := 0 'Set to echo reply
 
@@ -393,8 +418,8 @@ PRI handle_icmp | i,pkt_len
         repeat i from 0 to pkt_len+14
           nic.wr_frame(BYTE[pkt][i])
          
-        nic.calc_frame_ip_checksum
         nic.calc_checksum(icmp_type, icmp_type+pkt_len-20, icmp_cksum)
+        nic.calc_frame_ip_checksum
 
         ' send the packet
         nic.send_frame

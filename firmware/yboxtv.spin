@@ -7,6 +7,14 @@ CON
   '_stack = ($3000+(1024/4)+100) >> 2
 
   ButtonPin = 16                
+
+OBJ
+
+  tel           : "api_telnet_serial"
+  term          : "TV_Text"
+  timer         : "timer"
+  ir            : "ir_reader_sony"
+  subsys        : "subsys"
                                      
 VAR
 
@@ -29,13 +37,6 @@ VAR
 
   long weatherstack[30]
   
-OBJ
-
-  term          : "TV_Text"
-  timer         : "timer"
-  ir            : "ir_reader_sony"
-  subsys        : "subsys"
-   tel : "api_telnet_serial"
  
 PUB init
   outa[0]:=0
@@ -50,15 +51,20 @@ PUB init
   subsys.StatusLoading
 
   'error:=ir.init(15, $093A, 300, 1)
-  error:=ir.init(15, 0, 300, 1)
+  ir.init(15, 0, 300, 1)
   
   ' Comment out following line to mute
   'dira[8]:=1
   
   dira[0]:=0
 
-  tel.start(1,2,3,4,6,7,-1,-1)
+  if not \tel.start(1,2,3,4,6,7,-1,-1)
+    subsys.StatusFatalError
+    SadChirp
+    waitcnt(clkfreq + cnt)
+    reboot
 
+  
   HappyChirp
 
   term.out(13)  

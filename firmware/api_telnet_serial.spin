@@ -8,7 +8,7 @@ VAR
 
 PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
 
-  tcp.start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
+  return tcp.start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
 
 PUB stop
 
