@@ -89,7 +89,7 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   'stk.Init(@stack, 128)
 
   ' If we don't have an explicit mac address set, we need to make one!
-  if local_macaddr[0]==$10 and !local_macaddr[1] and !local_macaddr[2] and !local_macaddr[3] and !local_macaddr[4] and !local_macaddr[5] 
+  if local_macaddr[0]==$10 and local_macaddr[1]==0 and local_macaddr[2]==0 and local_macaddr[3]==0 and local_macaddr[4]==0 and local_macaddr[5]==0 
     generate_macaddr
     save_settings
     
@@ -113,9 +113,8 @@ PRI generate_macaddr
   random.stop
 PRI save_settings | addr
   addr := @local_macaddr & %11111111_10000000
-  'addr := $0600
   eeprom.Initialize(eeprom#BootPin)
-  if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, EEPROMPageSize*2)
+  if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, 128)
     abort FALSE
   
 PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
