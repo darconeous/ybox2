@@ -117,7 +117,7 @@ PRI save_settings | addr
   if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, 128)
     abort FALSE
   
-PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
+PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
 
   ' Start the ENC28J60 driver in a new cog
   if macptr == -1
@@ -136,6 +136,7 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
     send_bootp_request
     
   i := 0
+  dhcp_delay := 5000
   nic.banksel(nic#EPKTCNT)      ' select packet count bank
   repeat
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
@@ -145,10 +146,12 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
     ++i
     if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
-      if i > 5000
+      if i > dhcp_delay
         send_bootp_request
         i := 0
         nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
+        if dhcp_delay < 5000*32
+          dhcp_delay *= 2 ' Double the delay time. Exponential back-off.
     elseif i > 10
       ' perform send tick (occurs every 10 cycles, since incoming packets more important)
       tick_tcpsend
