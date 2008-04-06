@@ -25,15 +25,20 @@
 
 
 CON
+  _clkmode = xtal1 + pll16x
+  _xinfreq = 5_000_000                                                      
   version = 1.3
   apiversion = 3
   EEPROMPageSize = 128
+  RTCADDR = $6000
+
 DAT
         ' ** This is the ethernet MAC address, it is critical that you change this
         '    if you have more than one device using this code on a local network.
         ' ** If you plan on commercial deployment, you must purchase MAC address
         '    groups from IEEE or another organization.
-        local_macaddr   byte    $10, $00, $00, $00, $00, $00
+        local_macaddr   byte    $02, $00, $00, $00, $00, $00
+'        local_macaddr   byte    $02, $00, $00, $00, $BE, $EF
          
         ' ** The following are tcp stack ip addresses.  It is critical that the
         '    device IP address is unique and on the same subnet when used on a
@@ -43,16 +48,14 @@ DAT
         ip_subnet       byte    255, 255, 255, 0        ' network subnet
         ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
         ip_dns          byte    4, 2, 2, 4          ' network dns        
-
+        ip_dhcp_expire  long    0                   ' DHCP expiration
+        ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
 OBJ
   nic : "driver_enc28j60"
-
-  'ser : "SerialMirror"
-  'stk : "Stack Length"
-
-  random : "RealRandom"
-  eeprom : "Basic_I2C_Driver"
-
+  random   : "RealRandom"
+  settings : "settings"
+'  term     : "TV_Text"
+'  subsys   : "subsys"
 VAR
   long stack[128]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
 
@@ -65,19 +68,14 @@ DAT
 
   pkt_id                long 0                  ' packet fragmentation id
   pkt_isn               long 0                  ' packet initial sequence number
-
-'  sFlags                byte 0                  ' stack flags (arp response received, data to send, etc)
-
-'  local_macaddr         byte 0,0,0,0,0,0        ' local mac address (device mac)
-'  remote_macaddr        byte 0,0,0,0,0,0        ' remote host mac address
-
-  ' Statistic variables (don't really need these, but it's only 4 longs, so what the heck..)
-'  count_ping            long 0
-'  count_arp             long 0
-'  count_tcp             long 0
-'  count_udp             long 0
   
 
+PUB init
+'  term.start(12)
+'  subsys.init
+'  subsys.StatusLoading
+'  start(1,2,3,4,6,7,-1,-1)
+  
 PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 '' Call this to launch the Telnet driver
 '' Only call this once, otherwise you will get conflicts
@@ -88,35 +86,41 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   stop
   'stk.Init(@stack, 128)
 
+  if settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6) == FALSE
+    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
+  if settings.findKey(settings#NET_DHCPv4_DISABLE)
+    long[ip_dhcp_expire]:=$FFFFFFFF
+    
+  settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
+  settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
+  settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
+  settings.getData(settings#NET_IPv4_DNS,@ip_dns,4)
+
   ' If we don't have an explicit mac address set, we need to make one!
-  if local_macaddr[0]==$10 and local_macaddr[1]==0 and local_macaddr[2]==0 and local_macaddr[3]==0 and local_macaddr[4]==0 and local_macaddr[5]==0 
+  if local_macaddr[0]==$02 and local_macaddr[1]==0 and local_macaddr[2]==0 and local_macaddr[3]==0 and local_macaddr[4]==0 and local_macaddr[5]==0 
     generate_macaddr
-    save_settings
+    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
+    settings.commit
     
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
   return cog
   
 PUB stop
 '' Stop the driver
-
   if cog
-    nic.stop                    ' stop nic driver (kills spi engine)
     cogstop(cog~ - 1)           ' stop the tcp engine
+  nic.stop                    ' stop nic driver (kills spi engine)
+
 PRI generate_macaddr
   random.start
-  local_macaddr[0] := $10
+  local_macaddr[0] := $02
   local_macaddr[1] := random.random
   local_macaddr[2] := random.random
   local_macaddr[3] := random.random
   local_macaddr[4] := random.random
   local_macaddr[5] := random.random
   random.stop
-PRI save_settings | addr
-  addr := @local_macaddr & %11111111_10000000
-  eeprom.Initialize(eeprom#BootPin)
-  if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, 128)
-    abort FALSE
-  
+
 PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
 
   ' Start the ENC28J60 driver in a new cog
@@ -132,20 +136,21 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
 
   pkt := nic.get_packetpointer
 
-  if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+  if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
     send_bootp_request
     
   i := 0
   dhcp_delay := 5000
   nic.banksel(nic#EPKTCNT)      ' select packet count bank
   repeat
+
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
     if pkt_count > 0
       service_packet            ' handle packet
       nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
     ++i
-    if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+    if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
       if i > dhcp_delay
         send_bootp_request
         i := 0
@@ -166,16 +171,18 @@ PRI service_packet
   ' check for arp packet type (highest priority obviously)
   if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $06
     if BYTE[pkt][constant(arp_hwtype + 1)] == $01 AND BYTE[pkt][arp_prtype] == $08 AND BYTE[pkt][constant(arp_prtype + 1)] == $00 AND BYTE[pkt][arp_hwlen] == $06 AND BYTE[pkt][arp_prlen] == $04
+'      if LONG[pkt+arp_tipaddr] == LONG[@ip_addr]
       if BYTE[pkt][arp_tipaddr] == ip_addr[0] AND BYTE[pkt][constant(arp_tipaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(arp_tipaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(arp_tipaddr + 3)] == ip_addr[3]
         case BYTE[pkt][constant(arp_op + 1)]
           $01 : handle_arp
           $02 : handle_arpreply
         '++count_arp
-  elseif ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+  elseif long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00 AND BYTE[pkt][ip_proto] == PROT_UDP
       handle_udp 
   else
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00
+'      if LONG[pkt+ip_destaddr] == LONG[@ip_addr]
       if BYTE[pkt][ip_destaddr] == ip_addr[0] AND BYTE[pkt][constant(ip_destaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(ip_destaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(ip_destaddr + 3)] == ip_addr[3]
         case BYTE[pkt][ip_proto]
           PROT_ICMP : \handle_icmp
@@ -233,6 +240,8 @@ PRI handle_arp | i
   return nic.send_frame
 
 PRI send_bootp_request | i, pkt_len
+  'term.str(string("Sending DHCP request",13))
+  
   nic.start_frame
 
   ' destination mac address (broadcast address)
@@ -434,19 +443,28 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
-  if ip_addr[0] == 0 AND ip_addr[1] == 0 AND ip_addr[2] == 0 AND ip_addr[3] == 0
+  if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
     if dstport == 68 AND srcport == 67
-      ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
-      repeat i from 0 to 3
-        ip_addr[i] := BYTE[pkt][DHCP_yiaddr+i]
+      'term.str(string("Got DHCP reply!",13))
+      ' Close all open TCP sockets.
+      'closeall()
 
+      ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
+      bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
+      
+      ' Hackity hack hack... This is a dirty assumption we are making here...
       if BYTE[pkt][DHCP_giaddr]
-        repeat i from 0 to 3
-          ip_gateway[i] := BYTE[pkt][DHCP_giaddr+i]
+        bytemove(@ip_gateway, pkt+DHCP_giaddr, 4)
       else
-        repeat i from 0 to 3
-          ip_gateway[i] := BYTE[pkt][ip_srcaddr+i]
-      ' TODO: Real extraction of the gateway, netmask, etc...
+        bytemove(@ip_gateway, pkt+ip_srcaddr, 4)
+        
+      ' Set this IP address to expire in an hour.
+      ip_dhcp_expire := long[RTCADDR] + 3600
+      'term.str(string("Expiration: "))
+      'term.dec(ip_dhcp_expire)
+      'term.str(string(13))
+      
+      ' TODO: Real extraction of the gateway, netmask, expiration date, etc...
       
       'if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
         ' this is a DHCP packet! We should send a request.
@@ -644,6 +662,7 @@ PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
 
   ' send the packet
   nic.send_frame
+
 
 PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   ' Search for socket, matches ip address, port states
@@ -877,6 +896,10 @@ PUB close(handle) | handle_addr
   else
     BYTE[handle_addr + sConState] := SCLOSED
 
+PUB closeall(handle) | handle_addr
+  repeat handle from 0 to constant(sNumSockets - 1)
+    close(handle)
+    
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise
 

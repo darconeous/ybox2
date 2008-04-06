@@ -336,6 +336,13 @@ PUB wr_frame(data)
 
   wr_sram(data)
   ++tx_end
+PUB wr_frame_byte(data)
+  wr_frame(data)
+
+PUB wr_frame_data(data,len) | i
+  repeat while i<len
+    wr_frame(byte[data][i])
+    i++
 
 PUB send_frame
 '' Sends frame
@@ -347,6 +354,7 @@ PUB send_frame
     delay_ms(1)
 
 PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
+  ' TODO: This needs to be able to handle different header sizes!
   return calc_checksum(14,14+20,14+20-10)
   
 PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc

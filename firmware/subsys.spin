@@ -1,14 +1,17 @@
 ' This file handles the RGB LED, the piezo speaker, and the
-' button watchdog. 
+' button watchdog.
+' Also includes a RTC. 
 CON
   _clkmode = xtal1 + pll16x
   _xinfreq = 5_000_000                                                      
+  LED_CA = 0 ' 1 = Common Anode, 0 = Common Cathode
   LED_RPin = 9
   LED_GPin = 11
   LED_BPin = 10
+
   BTTNPin = 16
   SPKRPin = 8
-
+  RTCADDR = $6000
 VAR
   long LED_R
   long LED_G
@@ -18,6 +21,7 @@ VAR
   long stack[16] 'Stack space for new cog
   byte modecog
 PUB init
+  'long[RTCADDR]:=1
   cognew(@run, @LED_R) 
   StatusIdle
 
@@ -42,30 +46,23 @@ PUB FatalErrorCycle
   repeat while 1
     repeat while LED_R<>255
       LED_R++
-      TMP:=25
-      repeat while TMP
-        TMP--
+      waitcnt(20_000 + cnt)
     repeat while LED_R
       LED_R--
-      TMP:=25
-      repeat while TMP
-        TMP--
+      waitcnt(20_000 + cnt)
   
 PUB LoadingCycle
   LED_R:=0
   LED_G:=0
   LED_B:=0
   repeat while 1
+'    long[RTCADDR]++
     repeat while LED_B<>255
       LED_B++
-      TMP:=200
-      repeat while TMP
-        TMP--
+      waitcnt(100_000 + cnt)
     repeat while LED_B
       LED_B--
-      TMP:=200
-      repeat while TMP
-        TMP--
+      waitcnt(100_000 + cnt)
 
 PUB ColorCycle
 
@@ -74,29 +71,23 @@ PUB ColorCycle
   LED_B:=0
   repeat while LED_G<>255
     LED_G++
-    TMP:=1000
-    repeat while TMP
-      TMP--
+    waitcnt(400_000 + cnt)
   repeat while 1
     repeat while LED_G
       LED_G--
       LED_R++
-      TMP:=1000
-      repeat while TMP
-        TMP--
+      waitcnt(400_000 + cnt)
     repeat while LED_R
       LED_B++
       LED_R--
-      TMP:=1000
-      repeat while TMP
-        TMP--
+      waitcnt(400_000 + cnt)
     repeat while LED_B
       LED_G++
       LED_B--
-      TMP:=1000
-      repeat while TMP
-        TMP--
-     
+      waitcnt(400_000 + cnt)
+PUB RTC
+  return long[RTCADDR]
+      
 DAT
 
               org
@@ -120,6 +111,10 @@ run
               mov phsa,#0
               mov ctra,RSTCTR
               mov frqa,RSTFRQ
+
+              ' Set up RTCLAST for RTC
+              rdlong RTCLAST,#0
+              add RTCLAST, cnt
               
 loop
 
@@ -136,13 +131,21 @@ loop
               cmp  RSTTIME,phsa wc
         if_c  clkset RSTCLK
 
+              'rdlong T1,RTCPTR
+              'mov T1,#%111111111
+              'wrlong T1,RTCPTR
+
+              'rdlong T1,RTCPTR
+              'add T1,#1
+              'wrlong T1,RTCPTR
 
 LEDDutyLoop
 
               rdbyte T1,LEDRDutyPtr
               shl T1,#23
               add LEDRP,T1 wc
-        if_nc jmp #:LEDROff
+              long %010111_0001_0011_000000000_000000000 + :LEDROff + (LED_CA * %1001_000000000_000000000)
+'        if_nc jmp #:LEDROff
               or outa,LEDRMask
               jmp #:LEDRDone
 :LEDROff
@@ -152,7 +155,8 @@ LEDDutyLoop
               rdbyte T1,LEDGDutyPtr
               shl T1,#23
               add LEDGP,T1 wc
-        if_nc jmp #:LEDGOff
+              long %010111_0001_0011_000000000_000000000 + :LEDGOff + (LED_CA * %1001_000000000_000000000)
+'        if_nc jmp #:LEDGOff
               or outa,LEDGMask
               jmp #:LEDGDone
 :LEDGOff
@@ -162,27 +166,44 @@ LEDDutyLoop
               rdbyte T1,LEDBDutyPtr
               shl T1,#23
               add LEDBP,T1 wc
-        if_nc jmp #:LEDBOff
+              long %010111_0001_0011_000000000_000000000 + :LEDBOff + (LED_CA * %1001_000000000_000000000)
+'        if_nc jmp #:LEDBOff
               or outa,LEDBMask
               jmp #:LEDBDone
 :LEDBOff
               andn outa,LEDBMask
 :LEDBDone                  
 
+
+              ' Update the RTC
+              rdlong T1,#0
+              mov T2,RTCLAST
+              sub T2,cnt
+              cmp T1,T2 wc
+        if_nc jmp #loop
+              add RTCLAST,T1
+              rdlong T1,RTCPTR
+              add T1,#1
+              wrlong T1,RTCPTR
               jmp #loop
+              
 
 
-LEDRMask       long (1 << LED_RPin)
-LEDGMask       long (1 << LED_GPin)
-LEDBMask       long (1 << LED_BPin)
+LEDRMask      long (1 << LED_RPin)
+LEDGMask      long (1 << LED_GPin)
+LEDBMask      long (1 << LED_BPin)
 
-SPKRMask       long (1 << SPKRPin)
+SPKRMask      long (1 << SPKRPin)
 
 RSTCTR        long  %01000_111 << 23 + BTTNPin << 9 + 0
 RSTFRQ        long  1
-RSTTIME       long  5*80_000_000
+RSTTIME       long  5*80_000_0000
 RSTCLK        long  -1
+RTCPTR        long RTCADDR
+RTCLAST       res 1
+
 T1            res 1
+T2            res 1
 
 LEDRDutyPtr   res 1
 LEDGDutyPtr   res 1
@@ -191,4 +212,7 @@ LEDBDutyPtr   res 1
 LEDRP         res 1     ' Red Phase
 LEDGP         res 1     ' Green Phase
 LEDBP         res 1     ' Blue Phase
-               
+
+              FIT
+              
+         

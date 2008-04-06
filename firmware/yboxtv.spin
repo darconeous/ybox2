@@ -7,6 +7,7 @@ CON
   '_stack = ($3000+(1024/4)+100) >> 2
 
   ButtonPin = 16                
+  RTCADDR = $6000        ' Address of real-time clock (updated by subsys)
 
 OBJ
 
@@ -15,16 +16,11 @@ OBJ
   timer         : "timer"
   ir            : "ir_reader_sony"
   subsys        : "subsys"
+  settings      : "settings"
                                      
 VAR
-
-
-
   byte curr_chan
 
-  byte button_pushed
-  byte flickr_mode
-  word flasher
   byte error
   long ircode
   long TMP
@@ -35,26 +31,29 @@ VAR
   long gotstart
   long port
 
-  long weatherstack[30]
+  long weatherstack[40]
   
  
-PUB init
+PUB init | i
   outa[0]:=0
   dira[0]:=1
   
   term.start(12)
 
-  term.str(@title)
+  term.str(string("ybox2 debug",13,13))
 
   subsys.init
 
   subsys.StatusLoading
 
-  'error:=ir.init(15, $093A, 300, 1)
   ir.init(15, 0, 300, 1)
+  settings.start
+
+  'settings.setByte(settings#SOUND_DISABLE,TRUE)
   
   ' Comment out following line to mute
-  'dira[8]:=1
+  if settings.findKey(settings#SOUND_DISABLE) == FALSE
+    dira[8]:=1
   
   dira[0]:=0
 
@@ -64,30 +63,29 @@ PUB init
     waitcnt(clkfreq + cnt)
     reboot
 
-  
   HappyChirp
 
+  if settings.getData(settings#NET_MAC_ADDR,@weatherstack,6)
+    term.str(string("MAC: "))
+    repeat i from 0 to 5
+      if i
+        term.out("-")
+      term.hex(byte[@weatherstack][i],2)
   term.out(13)  
 
   main
   
 PUB main    
-  delay_ms(1000)
+  delay_ms(2000) ' Wait a second to let the ethernet stabalize
 
   cognew(WeatherUpdate, @weatherstack) 
-
 
   repeat while true
     ircode:=ir.fifo_get
     if ircode <> -1
-      term.out("K")
-      term.out("C")
-      term.out(":")
+      term.str(string("KC:"))
       term.hex(ircode,2)
-      term.out(" ")
-      term.out("I")
-      term.out("D")
-      term.out(":")
+      term.str(string(" ID:"))
       term.hex(ir.fifo_get_lastvalid,4)
       term.out(13)
     if ina[ButtonPin]
@@ -122,20 +120,18 @@ PUB main
 
     curr_chan := 0
 
-pub WeatherUpdate 
+pub WeatherUpdate | timeout, retrydelay
   port := 20000
+  retrydelay := 500
   repeat
   
     if port > 30000
       port := 20000
 
-    ++port
-    
-
     tel.connect(208,131,149,67,80,port)
     
     term.str(string($1,$A,39,$C,1," ",$C,$8))
-
+    
     tel.resetBuffers
     
     tel.waitConnectTimeout(2000)
@@ -151,6 +147,7 @@ pub WeatherUpdate
       tel.str(string("Connection: close",13,10,13,10)) 
 
       gotstart := false
+      timeout := cnt
       repeat
         if (in := tel.rxcheck) > 0
  
@@ -161,17 +158,31 @@ pub WeatherUpdate
             gotstart := true
         else
           ifnot tel.isConnected
+            ' Success!
+            retrydelay := 500 ' Reset the retry delay
             subsys.StatusIdle
+            term.dec(subsys.RTC)
             delay_ms(30000)     ' 30 sec delay
             subsys.StatusLoading
             quit
-            
+          if cnt-timeout>10*clkfreq ' 10 second timeout      
+            subsys.StatusFatalError
+            term.str(string($1,$B,12,$C,$1,"Error: Connection lost!",$C,$8))       
+            tel.close
+            ++port ' Change the source port, just in case
+            if retrydelay < 10_000
+               retrydelay+=retrydelay
+            delay_ms(retrydelay)             ' failed to connect     
+            quit
     else
       subsys.StatusFatalError
       term.str(string($1,$B,12,$C,$1,"Error: Failed to Connect!",$C,$8))
     
       tel.close
-      delay_ms(100)             ' failed to connect, try again in 100ms     
+      ++port ' Change the source port, just in case
+      if retrydelay < 10_000
+         retrydelay+=retrydelay
+      delay_ms(retrydelay)             ' failed to connects     
 
 pub HappyChirp
 
@@ -223,10 +234,4 @@ PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
 DAT
-title   byte    "ybox2 Debug",13,13,0
-irstart byte   "Starting ir...",0
-ethstart byte   "Starting ethernet...",0
-stat_fail byte   "FAIL",0
-stat_ok byte   "OK",0
-        ETH_MAC         byte    $10, $00, $00, $00, $00, $01
         
