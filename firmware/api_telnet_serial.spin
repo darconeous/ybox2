@@ -14,10 +14,10 @@ PUB stop
 
   tcp.stop
 
-PUB connect(ip1, ip2, ip3, ip4, remoteport, localport)
+PUB connect(ip, remoteport, localport)
 
   listening := false
-  return (handle := tcp.connect(ip1, ip2, ip3, ip4, remoteport, localport))
+  return (handle := tcp.connect(ip, remoteport, localport))
 
 PUB listen(port)
 

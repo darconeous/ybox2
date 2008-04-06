@@ -1,6 +1,11 @@
-' This file handles the RGB LED, the piezo speaker, and the
-' button watchdog.
-' Also includes a RTC. 
+{{
+        ybox2 - subsys object
+        http://www.deepdarc.com/ybox2
+
+        This file handles the RGB LED, the piezo speaker, and the
+        button watchdog.
+        Also includes a RTC.
+}} 
 CON
   _clkmode = xtal1 + pll16x
   _xinfreq = 5_000_000                                                      

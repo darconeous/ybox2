@@ -33,22 +33,15 @@ CON
   RTCADDR = $6000
 
 DAT
-        ' ** This is the ethernet MAC address, it is critical that you change this
-        '    if you have more than one device using this code on a local network.
-        ' ** If you plan on commercial deployment, you must purchase MAC address
-        '    groups from IEEE or another organization.
-        local_macaddr   byte    $02, $00, $00, $00, $00, $00
-'        local_macaddr   byte    $02, $00, $00, $00, $BE, $EF
-         
-        ' ** The following are tcp stack ip addresses.  It is critical that the
-        '    device IP address is unique and on the same subnet when used on a
-        '    local network.
-                        long    0                       ' long alignment for addresses, don't remove
-        ip_addr         byte    0, 0, 0, 0            ' device's ip address
-        ip_subnet       byte    255, 255, 255, 0        ' network subnet
-        ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
-        ip_dns          byte    4, 2, 2, 4          ' network dns        
+        ' Don't set any of these values by hand!
+        ' Use the associated setting keys instead.
+        ' See the settings object for more details.
+        local_macaddr   byte    $00, $00, $00, $00, $00, $00
         ip_dhcp_expire  long    0                   ' DHCP expiration
+        ip_addr         byte    0,0,0,0            ' device's ip address
+        ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
+        ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
+        ip_dns          byte    $04,$02,$02,$04          ' network dns        
         ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
 OBJ
   nic : "driver_enc28j60"
@@ -86,21 +79,21 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   stop
   'stk.Init(@stack, 128)
 
+  ' If we don't have an explicit mac address set, we need to make one!
   if settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6) == FALSE
+    generate_macaddr
     settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
+    settings.commit
+
+  ' If DHCP is disabled, set the expire time to be way in the future. 
   if settings.findKey(settings#NET_DHCPv4_DISABLE)
-    long[ip_dhcp_expire]:=$FFFFFFFF
+    long[ip_dhcp_expire]:=$7FFFFFFF
     
   settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
   settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
   settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
   settings.getData(settings#NET_IPv4_DNS,@ip_dns,4)
 
-  ' If we don't have an explicit mac address set, we need to make one!
-  if local_macaddr[0]==$02 and local_macaddr[1]==0 and local_macaddr[2]==0 and local_macaddr[3]==0 and local_macaddr[4]==0 and local_macaddr[5]==0 
-    generate_macaddr
-    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
-    settings.commit
     
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
   return cog
@@ -460,11 +453,13 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
         
       ' Set this IP address to expire in an hour.
       ip_dhcp_expire := long[RTCADDR] + 3600
-      'term.str(string("Expiration: "))
-      'term.dec(ip_dhcp_expire)
-      'term.str(string(13))
       
       ' TODO: Real extraction of the gateway, netmask, expiration date, etc...
+
+      settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
+      settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
+      settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
+      settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
       
       'if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
         ' this is a DHCP packet! We should send a request.
@@ -868,7 +863,7 @@ PUB listen(port) | handle_addr
 
   return BYTE[handle_addr + sSockIndex] 
 
-PUB connect(ip1, ip2, ip3, ip4, remoteport, localport) | handle_addr
+PUB connect(ip, remoteport, localport) | handle_addr
 '' Connect to remote host
 '' Returns handle to new socket, -1 if no socket available
 '' Nonblocking
@@ -880,7 +875,7 @@ PUB connect(ip1, ip2, ip3, ip4, remoteport, localport) | handle_addr
     return -1
 
   ' copy in ip, port data (with respect to the remote host, since we use same code as server)
-  LONG[handle_addr + sSrcIp] := conv_endianlong((ip1 << 24) + (ip2 << 16) + (ip3 << 8) + ip4)
+  LONG[handle_addr + sSrcIp] := ip
   WORD[handle_addr + sSrcPort] := conv_endianword(remoteport)
   WORD[handle_addr + sDstPort] := conv_endianword(localport)
 
