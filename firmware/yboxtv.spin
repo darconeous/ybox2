@@ -84,6 +84,14 @@ PUB init | i
     term.dec(byte[@weatherstack][i])
   term.out(13)  
 
+  if settings.getData(settings#NET_IPv4_DNS,@weatherstack,4)
+    term.str(string("DNS ADDR:"))
+    repeat i from 0 to 3
+      if i
+        term.out(".")
+      term.dec(byte[@weatherstack][i])
+    term.out(13)  
+
   if settings.getData(settings#SERVER_IPv4_ADDR,@weatherstack,4)
     term.str(string("SERVER ADDR:"))
     repeat i from 0 to 3
@@ -111,10 +119,12 @@ PRI initial_configuration
   ' Mark outselves as configured so we know we don't have to repeat this step.
   settings.setByte(settings#MISC_CONFIGURED_FLAG,TRUE)
 
+  settings.setString(settings#MISC_PASSWORD,string("password"))  
+
   ' If the mac address is left undefined, a random
   ' one will be chosen on the first boot. This is
   ' safe to leave commented out.
-  'settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
+  settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
 
   ' Uncomment and change these settings if you don't want to use DHCP
   {
@@ -126,7 +136,7 @@ PRI initial_configuration
   }
 
   ' If you want sound off by default, uncomment the next line
-  'settings.setByte(settings#SOUND_DISABLE,TRUE)
+  settings.setByte(settings#SOUND_DISABLE,TRUE)
   
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)

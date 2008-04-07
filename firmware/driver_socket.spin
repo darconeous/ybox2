@@ -36,13 +36,17 @@ DAT
         ' Don't set any of these values by hand!
         ' Use the associated setting keys instead.
         ' See the settings object for more details.
-        local_macaddr   byte    $00, $00, $00, $00, $00, $00
+        local_macaddr   byte    $02, $00, $00, $00, $00, $01
         ip_dhcp_expire  long    0                   ' DHCP expiration
         ip_addr         byte    0,0,0,0            ' device's ip address
         ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
         ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
         ip_dns          byte    $04,$02,$02,$04          ' network dns        
         ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
+
+
+        bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
+
 OBJ
   nic : "driver_enc28j60"
   random   : "RealRandom"
@@ -65,9 +69,10 @@ DAT
 
 PUB init
 '  term.start(12)
+  settings.start
 '  subsys.init
 '  subsys.StatusLoading
-'  start(1,2,3,4,6,7,-1,-1)
+  start(1,2,3,4,6,7,-1,-1)
   
 PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 '' Call this to launch the Telnet driver
@@ -188,178 +193,89 @@ PRI service_packet
 ' *******************************
 ' ** Protocol Receive Handlers **
 ' *******************************
-PRI handle_arp | i
+PRI compose_ethernet_header(dst_macaddr,src_macaddr,size)
+  nic.wr_frame_data(dst_macaddr,6)
+  nic.wr_frame_data(src_macaddr,6)
+  nic.wr_frame_word(size)
+PRI compose_ip_header(protocol,dst_addr,src_addr)
+  nic.wr_frame($45)        ' ip vesion and header size
+  nic.wr_frame($00)        ' TOS
+  nic.wr_frame_word($00)  ' IP Packet Length (Will be filled in at a later step)
+  nic.wr_frame_word(++pkt_id)
+  nic.wr_frame($40)  ' Don't fragment
+  nic.wr_frame($00)  ' frag stuff
+  nic.wr_frame($FF)  ' TTL
+  nic.wr_frame(protocol)  ' UDP
+  nic.wr_frame_word($00)  ' header checksum (Filled in by hardware)
+  nic.wr_frame_data(@src_addr,4)
+  nic.wr_frame_data(@dst_addr,4)
+PRI compose_udp_header(dst_port,src_port)
+  nic.wr_frame_word(src_port)  ' Source Port
+  nic.wr_frame_word(dst_port)  ' Dest Port
+  nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
+  nic.wr_frame_word($00)  ' UDP checksum
+PRI arp_request(ip1, ip2, ip3, ip4) | i
   nic.start_frame
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0806)
 
-  ' destination mac address
-  repeat i from 0 to 5
-    nic.wr_frame(BYTE[pkt][enetpacketSrc0 + i])
+  nic.wr_frame_word($0001)        ' 10mb ethernet
 
-  ' source mac address
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-
-  nic.wr_frame($08)             ' arp packet
-  nic.wr_frame($06)
-
-  nic.wr_frame($00)             ' 10mb ethernet
-  nic.wr_frame($01)
-
-  nic.wr_frame($08)             ' ip proto
-  nic.wr_frame($00)
+  nic.wr_frame_word($0800)             ' ip proto
 
   nic.wr_frame($06)             ' mac addr len
   nic.wr_frame($04)             ' proto addr len
 
-  nic.wr_frame($00)             ' arp reply
-  nic.wr_frame($02)
+  nic.wr_frame_word($0001)             ' arp request
 
   ' write ethernet module mac address
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
+  nic.wr_frame_data(@local_macaddr,6)
 
   ' write ethernet module ip address
-  repeat i from 0 to 3
-    nic.wr_frame(ip_addr[i])
+  nic.wr_frame_data(@ip_addr,4)
+
+  ' unknown mac address area
+  nic.wr_frame_pad(6)
+
+  ' figure out if we need router arp request or host arp request
+  ' this means some subnet masking
+
+  ' dest ip address
+  nic.wr_frame(ip1)
+  nic.wr_frame(ip2)
+  nic.wr_frame(ip3)
+  nic.wr_frame(ip4)
+
+  ' send the request
+  return nic.send_frame
+
+
+PRI handle_arp | i
+  nic.start_frame
+  compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0806)
+
+  nic.wr_frame_word($0001)        ' 10mb ethernet
+
+  nic.wr_frame_word($0800)             ' ip proto
+
+  nic.wr_frame($06)             ' mac addr len
+  nic.wr_frame($04)             ' proto addr len
+
+  nic.wr_frame_word($0002)             ' arp reply
+
+  ' write ethernet module mac address
+  nic.wr_frame_data(@local_macaddr,6)
+
+  ' write ethernet module ip address
+  nic.wr_frame_data(@ip_addr,4)
 
   ' write remote mac address
-  repeat i from 0 to 5
-    nic.wr_frame(BYTE[pkt][enetpacketSrc0 + i])
+  nic.wr_frame_data(pkt+enetpacketSrc0,6)
 
   ' write remote ip address
-  repeat i from 0 to 3
-    nic.wr_frame(BYTE[pkt][arp_sipaddr + i])
+  nic.wr_frame_data(pkt+arp_sipaddr,4)
 
   return nic.send_frame
 
-PRI send_bootp_request | i, pkt_len
-  'term.str(string("Sending DHCP request",13))
-  
-  nic.start_frame
-
-  ' destination mac address (broadcast address)
-  repeat i from 0 to 5
-    nic.wr_frame($FF)
-
-  ' source mac address
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-
-  nic.wr_frame($08)             ' IP packet
-  nic.wr_frame($00)
-
-  nic.wr_frame($45)        ' ip vesion and header size
-  
-  nic.wr_frame($00)        ' TOS
-  
-  pkt_len := $0148
-  nic.wr_frame($01)
-  nic.wr_frame($48)  ' IP Packet Length
-
-  ++pkt_id
-
-  nic.wr_frame(pkt_id >> 8)                                               ' Used for fragmentation
-  nic.wr_frame(pkt_id)
-
-  nic.wr_frame($40)  ' Don't fragment
-  nic.wr_frame($00)  ' frag stuff
-
-  nic.wr_frame($FF)  ' TTL
-  nic.wr_frame(PROT_UDP)  ' UDP
-
-  nic.wr_frame($00)
-  nic.wr_frame($00)  ' header checksum (Filled in by hardware)
-  
-
-  ' source IP address (all zeros
-  repeat i from 0 to 3
-    nic.wr_frame($00)
-
-  ' dest IP address (broadcast)
-  repeat i from 0 to 3
-    nic.wr_frame($FF)
-
-  nic.wr_frame(00)  ' Source Port
-  nic.wr_frame(68)  ' UDP
-
-  nic.wr_frame(00)  ' Dest Port
-  nic.wr_frame(67)  ' UDP
-
-  nic.wr_frame($01)
-  nic.wr_frame($34)  ' UDP packet Length
-
-
-  nic.wr_frame($00)
-  nic.wr_frame($00)  ' UDP checksum
-
-  nic.wr_frame($01) ' op (bootrequest)
-  nic.wr_frame($01) ' htype
-  nic.wr_frame($06) ' hlen
-  nic.wr_frame($00) ' hops
-
-  ' xid
-  nic.wr_frame($00)
-  nic.wr_frame($00)
-  nic.wr_frame(pkt_id >> 8)
-  nic.wr_frame(pkt_id)
-
-  nic.wr_frame($00) ' secs
-  nic.wr_frame($7F) ' secs
-
-  nic.wr_frame($00) ' padding
-  nic.wr_frame($00) ' padding
-
-  repeat i from 0 to 3
-    nic.wr_frame(ip_addr[i]) 'ciaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'yiaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'siaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'giaddr
-
-  ' source mac address
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-  repeat i from 0 to 9
-    nic.wr_frame(0)
-
-  repeat i from 0 to 63
-    nic.wr_frame(0) 'sname
-
-  repeat i from 0 to 127
-    nic.wr_frame(0) ' file
-  
-  ' DHCP Magic Cookie
-  nic.wr_frame($63)
-  nic.wr_frame($82)
-  nic.wr_frame($53)
-  nic.wr_frame($63)
-
-  ' DHCP Message Type
-  nic.wr_frame(53)
-  nic.wr_frame($01)
-  nic.wr_frame($01)
-
-  ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-
-  ' End of vendor data
-  nic.wr_frame($FF)
-
-  repeat i from 0 to 46
-    nic.wr_frame(0) 'vend
-
-  nic.calc_frame_ip_checksum
-
-  'UDP Checksum, but missing the pseudo ip appendage.
-  'Not a problem, because in UDP the checksum is optional.
-  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
-  return nic.send_frame
 
 PRI handle_arpreply | handle, handle_addr, ip, found
   ' Gets arp reply if it is a response to an ip we have
@@ -427,8 +343,171 @@ PRI handle_icmp | i,pkt_len
 
         ' send the packet
         nic.send_frame
-         
+PRI send_bootp_request | i, pkt_len
+  'term.str(string("Sending DHCP request",13))
   
+  nic.start_frame
+
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
+  compose_ip_header(PROT_UDP,$FFFFFFFF,$00000000)
+  compose_udp_header(67,68)
+
+  nic.wr_frame($01) ' op (bootrequest)
+  nic.wr_frame($01) ' htype
+  nic.wr_frame($06) ' hlen
+  nic.wr_frame($00) ' hops
+
+  ' xid
+  nic.wr_frame_long(++pkt_id)
+
+  nic.wr_frame_word(long[RTCADDR]-ip_dhcp_expire) ' secs
+
+  nic.wr_frame_word($00) ' padding
+
+  repeat i from 0 to 3
+    nic.wr_frame(ip_addr[i]) 'ciaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'yiaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'siaddr
+  repeat i from 0 to 3
+    nic.wr_frame(0) 'giaddr
+
+  ' source mac address
+  repeat i from 0 to 5
+    nic.wr_frame(local_macaddr[i])
+  repeat i from 0 to 9
+    nic.wr_frame(0)
+
+  repeat i from 0 to 63
+    nic.wr_frame(0) 'sname
+
+  repeat i from 0 to 127
+    nic.wr_frame(0) ' file
+  
+  ' DHCP Magic Cookie
+  nic.wr_frame($63)
+  nic.wr_frame($82)
+  nic.wr_frame($53)
+  nic.wr_frame($63)
+
+  ' DHCP Message Type
+  nic.wr_frame(53)
+  nic.wr_frame($01)
+  nic.wr_frame($01)
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  repeat i from 0 to 5
+    nic.wr_frame(local_macaddr[i])
+
+  ' End of vendor data
+  nic.wr_frame($FF)
+
+  repeat i from 0 to 46
+    nic.wr_frame(0) 'vend
+
+  'nic.calc_frame_ip_length
+  nic.calc_frame_udp_length
+  nic.calc_frame_ip_checksum
+  
+  'UDP Checksum, but missing the pseudo ip appendage.
+  'Not a problem, because in UDP the checksum is optional.
+  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
+  return nic.send_frame
+
+  
+PRI dhcp_offer_response | i, ptr         
+  nic.start_frame
+
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
+  compose_ip_header(PROT_UDP,$FFFFFFFF,$00000000)
+  compose_udp_header(67,68)
+
+  nic.wr_frame($01) ' op (bootrequest)
+  nic.wr_frame($01) ' htype
+  nic.wr_frame($06) ' hlen
+  nic.wr_frame(byte[pkt+DHCP_hops]) ' hops
+
+  ' xid
+  'nic.wr_frame_data(pkt+DHCP_xid,4)
+  nic.wr_frame_long(++pkt_id)
+  
+  nic.wr_frame_word(word[pkt+DHCP_secs]) ' secs
+
+  nic.wr_frame_pad(2) ' padding ('flags')
+
+  nic.wr_frame_data(@ip_addr,4) 'ciaddr
+'  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
+'  nic.wr_frame_data(pkt+DHCP_siaddr,4) 'siaddr
+'  nic.wr_frame_data(pkt+DHCP_giaddr,4) 'giaddr
+  nic.wr_frame_pad(4) ' padding
+  nic.wr_frame_pad(4) ' padding
+  nic.wr_frame_pad(4) ' padding
+
+  ' source mac address
+  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_pad(10) ' padding
+
+  nic.wr_frame_pad(64) ' sname (empty)
+
+  nic.wr_frame_pad(128) ' file (empty)
+  
+  ' DHCP Magic Cookie
+  nic.wr_frame($63)
+  nic.wr_frame($82)
+  nic.wr_frame($53)
+  nic.wr_frame($63)
+
+  ' DHCP Message Type
+  nic.wr_frame(53)
+  nic.wr_frame($01)
+  nic.wr_frame($03)
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  nic.wr_frame_data(@local_macaddr,6)
+
+  if long[pkt+DHCP_yiaddr]
+    nic.wr_frame(50)
+    nic.wr_frame($04)
+    nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
+  elseif long[pkt+DHCP_ciaddr]
+    nic.wr_frame(50)
+    nic.wr_frame($04)
+    nic.wr_frame_data(pkt+DHCP_ciaddr,4) 'ciaddr
+
+  ptr:=pkt+DHCP_Options+4
+  repeat while byte[ptr]<>$FF
+    case byte[ptr]
+      54 : ' DHCP server id
+        nic.wr_frame(54)
+        nic.wr_frame(byte[ptr+1])
+        nic.wr_frame_data((ptr+2),byte[ptr+1])
+    if byte[ptr]
+      ptr++
+      ptr+=byte[ptr]+1
+    else   
+      ptr++
+
+  ' End of vendor data
+  nic.wr_frame($FF)
+
+  nic.wr_frame_pad(32) ' Padding
+
+  nic.calc_frame_udp_length
+  nic.calc_frame_ip_checksum
+  
+  'UDP Checksum, but missing the pseudo ip appendage.
+  'Not a problem, because in UDP the checksum is optional.
+  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
+
+  return nic.send_frame
+   
 PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
   ' Handles incoming UDP packets
 
@@ -438,6 +517,24 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
   if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
     if dstport == 68 AND srcport == 67
+      if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+        ' this is a DHCP packet! We should send a request.
+        ptr:=pkt+DHCP_Options+4
+        repeat while byte[ptr]<>$FF
+          case byte[ptr]
+            53 : ' DHCP message type
+              if byte[ptr+2]==2
+                dhcp_offer_response
+                return
+              if byte[ptr+2]<>5
+                ' If this isn't an ACK, then ignore it.
+                'return
+          if byte[ptr]
+            ptr++
+            ptr+=byte[ptr]+1
+          else   
+            ptr++
+
       'term.str(string("Got DHCP reply!",13))
       ' Close all open TCP sockets.
       'closeall()
@@ -454,15 +551,45 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
       ' Set this IP address to expire in an hour.
       ip_dhcp_expire := long[RTCADDR] + 3600
       
-      ' TODO: Real extraction of the gateway, netmask, expiration date, etc...
-
+      if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+        ptr:=pkt+DHCP_Options+4
+        repeat while byte[ptr]<>$FF
+          case byte[ptr]
+            01 : bytemove(@ip_subnet,ptr+2,4)
+            03 : bytemove(@ip_gateway,ptr+2,4)
+            06 : bytemove(@ip_dns,ptr+2,4)
+            23 : ' Default IP TTL
+            28 : ' Broadcast address
+            37 : ' Default TCP TTL
+            42 : ' NTP Servers
+            51 :
+              bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
+              ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
+              ip_dhcp_expire>>=2
+              ip_dhcp_expire+=long[RTCADDR]
+            53 : ' DHCP message type
+              'if byte[ptr+2]==2
+                'TODO: This is a DHCP Offer. We need to send a formal DHCP request.
+                'dhcp_offer_response 
+            58 : ' DHCP renewal time
+            '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
+            '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
+            '  ip_dhcp_expire+=long[RTCADDR]
+            '  term.str(string("Renewal set to:"))
+            '  term.dec(ip_dhcp_expire/(3600))
+            '  term.out(13)
+          if byte[ptr]
+            ptr++
+            ptr+=byte[ptr]+1
+          else   
+            ptr++
+            
+      
       settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
       settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
       settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
       settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
       
-      'if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
-        ' this is a DHCP packet! We should send a request.
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
   ' Handles incoming TCP packets
@@ -756,55 +883,6 @@ PRI arp_request_checkgateway(handle_addr) | ip_ptr
     arp_request(ip_gateway[0], ip_gateway[1], ip_gateway[2], ip_gateway[3])
     BYTE[handle_addr + sConState] := SCONNECTINGARP2G   
   
-PRI arp_request(ip1, ip2, ip3, ip4) | i
-  nic.start_frame
-
-  ' destination mac address (broadcast mac)
-  repeat i from 0 to 5
-    nic.wr_frame($FF)
-
-  ' source mac address (this device)
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-
-  nic.wr_frame($08)             ' arp packet
-  nic.wr_frame($06)
-
-  nic.wr_frame($00)             ' 10mb ethernet
-  nic.wr_frame($01)
-
-  nic.wr_frame($08)             ' ip proto
-  nic.wr_frame($00)
-
-  nic.wr_frame($06)             ' mac addr len
-  nic.wr_frame($04)             ' proto addr len
-
-  nic.wr_frame($00)             ' arp request
-  nic.wr_frame($01)
-
-  ' source mac address (this device)
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-
-  ' source ip address (this device)
-  repeat i from 0 to 3
-    nic.wr_frame(ip_addr[i])
-
-  ' unknown mac address area
-  repeat i from 0 to 5
-    nic.wr_frame($00)
-
-  ' figure out if we need router arp request or host arp request
-  ' this means some subnet masking
-
-  ' dest ip address
-  nic.wr_frame(ip1)
-  nic.wr_frame(ip2)
-  nic.wr_frame(ip3)
-  nic.wr_frame(ip4)
-
-  ' send the request
-  return nic.send_frame
   
 ' *******************************
 ' ** IP Packet Helpers (Calcs) **
