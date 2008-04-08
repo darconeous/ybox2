@@ -363,7 +363,7 @@ PUB send_frame
     if p_send_frame             ' send packet, if successful then quit retry loop
       quit          
     delay_ms(1)
-PUB calc_frame_udp_length | length, ip_len
+PUB calc_frame_ip_length | length, ip_len
   length:=tx_end-constant(TXSTART - 1)-14-1
 
   ip_len := $10 + TXSTART +1
@@ -373,16 +373,28 @@ PUB calc_frame_udp_length | length, ip_len
   wr_reg(EWRPTH, ip_len >> 8)
   wr_sram(length>>8) 
   wr_sram(length) 
+  return length
+  
+PUB calc_frame_udp_length | length, ip_len
+'  length:=tx_end-constant(TXSTART - 1)-14-1
+
+'  ip_len := $10 + TXSTART +1
+
+'  banksel(EWRPTL)
+'  wr_reg(EWRPTL, ip_len)
+'  wr_reg(EWRPTH, ip_len >> 8)
+'  wr_sram(length>>8) 
+'  wr_sram(length) 
 
   ip_len := $26 + TXSTART +1
-  length-=28
+  length:=calc_frame_ip_length - 28
 
   banksel(EWRPTL)
   wr_reg(EWRPTL, ip_len)
   wr_reg(EWRPTH, ip_len >> 8)
   wr_sram(length>>8) 
   wr_sram(length) 
-
+  return length
   
 PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
   ' TODO: This needs to be able to handle different header sizes!

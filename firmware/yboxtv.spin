@@ -124,7 +124,7 @@ PRI initial_configuration
   ' If the mac address is left undefined, a random
   ' one will be chosen on the first boot. This is
   ' safe to leave commented out.
-  settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
+  'settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
 
   ' Uncomment and change these settings if you don't want to use DHCP
   {

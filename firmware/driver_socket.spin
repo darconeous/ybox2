@@ -323,7 +323,7 @@ PRI handle_icmp | i,pkt_len
         BYTE[pkt][ip_hdr_cksum] := $0
         BYTE[pkt][ip_hdr_cksum+1] := $0
 
-        'BYTE[pkt][ip_ttl] := $ff ' reset the time to live
+        BYTE[pkt][ip_ttl] := $ff ' reset the time to live
 
         BYTE[pkt][icmp_type] := 0 'Set to echo reply
 
@@ -335,10 +335,11 @@ PRI handle_icmp | i,pkt_len
         ' send the packet
         nic.start_frame
          
-        repeat i from 0 to pkt_len+14
+        repeat i from 0 to pkt_len+14 -1
           nic.wr_frame(BYTE[pkt][i])
          
-        nic.calc_checksum(icmp_type, icmp_type+pkt_len-20, icmp_cksum)
+        nic.calc_frame_ip_length
+        nic.calc_checksum(icmp_type+2, pkt_len+14, icmp_cksum)
         nic.calc_frame_ip_checksum
 
         ' send the packet
@@ -440,12 +441,9 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame_pad(2) ' padding ('flags')
 
   nic.wr_frame_data(@ip_addr,4) 'ciaddr
-'  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
-'  nic.wr_frame_data(pkt+DHCP_siaddr,4) 'siaddr
-'  nic.wr_frame_data(pkt+DHCP_giaddr,4) 'giaddr
-  nic.wr_frame_pad(4) ' padding
-  nic.wr_frame_pad(4) ' padding
-  nic.wr_frame_pad(4) ' padding
+  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
+  nic.wr_frame_data(pkt+DHCP_siaddr,4) 'siaddr
+  nic.wr_frame_data(pkt+DHCP_giaddr,4) 'giaddr
 
   ' source mac address
   nic.wr_frame_data(@local_macaddr,6)
@@ -497,7 +495,7 @@ PRI dhcp_offer_response | i, ptr
   ' End of vendor data
   nic.wr_frame($FF)
 
-  nic.wr_frame_pad(32) ' Padding
+  nic.wr_frame_pad(35) ' Padding
 
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
