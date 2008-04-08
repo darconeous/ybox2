@@ -334,9 +334,7 @@ PRI handle_icmp | i,pkt_len
         
         ' send the packet
         nic.start_frame
-         
-        repeat i from 0 to pkt_len+14 -1
-          nic.wr_frame(BYTE[pkt][i])
+        nic.wr_frame_data(pkt,pkt_len+14)
          
         nic.calc_frame_ip_length
         nic.calc_checksum(icmp_type+2, pkt_len+14, icmp_cksum)
