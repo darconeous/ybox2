@@ -17,16 +17,16 @@ CON
   BTTNPin = 16
   SPKRPin = 8
   RTCADDR = $6000
+DAT
+TMP     long 0
+TMP2    long 0
+LED_R   byte 0
+LED_G   byte 0
+LED_B   byte 0
+modecog byte 0
 VAR
-  long LED_R
-  long LED_G
-  long LED_B
-  long TMP
-  long TMP2
   long stack[16] 'Stack space for new cog
-  byte modecog
 PUB init
-  'long[RTCADDR]:=1
   cognew(@run, @LED_R) 
   StatusIdle
 
@@ -100,9 +100,9 @@ DAT
 run
               mov T1,par
               mov LEDRDutyPtr,T1
-              add T1,#4
+              add T1,#1
               mov LEDGDutyPtr,T1
-              add T1,#4
+              add T1,#1
               mov LEDBDutyPtr,T1
 
               ' Set the directions on the pins we control
@@ -136,13 +136,6 @@ loop
               cmp  RSTTIME,phsa wc
         if_c  clkset RSTCLK
 
-              'rdlong T1,RTCPTR
-              'mov T1,#%111111111
-              'wrlong T1,RTCPTR
-
-              'rdlong T1,RTCPTR
-              'add T1,#1
-              'wrlong T1,RTCPTR
 
 LEDDutyLoop
 
@@ -205,18 +198,18 @@ RSTFRQ        long  1
 RSTTIME       long  5*80_000_0000
 RSTCLK        long  -1
 RTCPTR        long RTCADDR
-RTCLAST       res 1
+RTCLAST       long 0
 
-T1            res 1
-T2            res 1
+T1            long 0
+T2            long 0
 
-LEDRDutyPtr   res 1
-LEDGDutyPtr   res 1
-LEDBDutyPtr   res 1
+LEDRDutyPtr   long 0
+LEDGDutyPtr   long 0
+LEDBDutyPtr   long 0
 
-LEDRP         res 1     ' Red Phase
-LEDGP         res 1     ' Green Phase
-LEDBP         res 1     ' Blue Phase
+LEDRP         long 0     ' Red Phase
+LEDGP         long 0     ' Green Phase
+LEDBP         long 0     ' Blue Phase
 
               FIT
               

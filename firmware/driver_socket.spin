@@ -37,12 +37,14 @@ DAT
         ' Use the associated setting keys instead.
         ' See the settings object for more details.
         local_macaddr   byte    $02, $00, $00, $00, $00, $01
-        ip_dhcp_expire  long    0                   ' DHCP expiration
+        local_mtu       word    1500
         ip_addr         byte    0,0,0,0            ' device's ip address
         ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
         ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
         ip_dns          byte    $04,$02,$02,$04          ' network dns        
         ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
+        ip_maxhops      byte    $80
+        ip_dhcp_expire  long    0                   ' DHCP expiration
 
 
         bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
@@ -55,7 +57,8 @@ OBJ
 '  subsys   : "subsys"
 VAR
   long stack[128]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
-
+  long randseed
+  
 DAT             
   ' Global variables (accessable between cogs)
   cog                   long 0                       
@@ -83,6 +86,10 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 
   stop
   'stk.Init(@stack, 128)
+
+  random.start
+  randseed := random.random
+  random.stop
 
   ' If we don't have an explicit mac address set, we need to make one!
   if settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6) == FALSE
@@ -138,7 +145,8 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
     send_bootp_request
     
   i := 0
-  dhcp_delay := 5000
+  dhcp_delay := 5000 + 255 - (randseed? >> 23)
+
   nic.banksel(nic#EPKTCNT)      ' select packet count bank
   repeat
 
@@ -155,6 +163,7 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
         nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
         if dhcp_delay < 5000*32
           dhcp_delay *= 2 ' Double the delay time. Exponential back-off.
+          dhcp_delay += 255-(randseed? >> 23) ' Add some randomness
     elseif i > 10
       ' perform send tick (occurs every 10 cycles, since incoming packets more important)
       tick_tcpsend
@@ -184,10 +193,7 @@ PRI service_packet
       if BYTE[pkt][ip_destaddr] == ip_addr[0] AND BYTE[pkt][constant(ip_destaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(ip_destaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(ip_destaddr + 3)] == ip_addr[3]
         case BYTE[pkt][ip_proto]
           PROT_ICMP : \handle_icmp
-                      'ser.str(stk.GetLength(0, 0))
-                      '++count_ping
           PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
-                      '++count_tcp
           PROT_UDP :  \handle_udp
 
 ' *******************************
@@ -204,7 +210,7 @@ PRI compose_ip_header(protocol,dst_addr,src_addr)
   nic.wr_frame_word(++pkt_id)
   nic.wr_frame($40)  ' Don't fragment
   nic.wr_frame($00)  ' frag stuff
-  nic.wr_frame($FF)  ' TTL
+  nic.wr_frame(ip_maxhops)  ' TTL
   nic.wr_frame(protocol)  ' UDP
   nic.wr_frame_word($00)  ' header checksum (Filled in by hardware)
   nic.wr_frame_data(@src_addr,4)
@@ -319,25 +325,22 @@ PRI handle_icmp | i,pkt_len
         BYTE[pkt][ip_id] := pkt_id >> 8
         BYTE[pkt][ip_id+1] := pkt_id
 
-        ' Zero out the header checksum (to be caculated in hardware)
-        BYTE[pkt][ip_hdr_cksum] := $0
-        BYTE[pkt][ip_hdr_cksum+1] := $0
-
-        BYTE[pkt][ip_ttl] := $ff ' reset the time to live
-
         BYTE[pkt][icmp_type] := 0 'Set to echo reply
 
-        ' Zero out the ICMP checksum (to be calculated in hardware)
-        BYTE[pkt][icmp_cksum] := 0
-        BYTE[pkt][icmp_cksum+1] := 0
-        pkt_len := (BYTE[pkt+ip_pktlen]<<8)+BYTE[pkt+ip_pktlen+1]
-        
+        ' Zero out the checksums (to be caculated in hardware)
+        WORD[pkt+ip_hdr_cksum][0] := 0
+        WORD[pkt+icmp_cksum][0] := 0
+
+        BYTE[pkt][ip_ttl] := ip_maxhops ' reset the time to live
+
+        pkt_len := (BYTE[pkt+ip_pktlen]<<8)+BYTE[pkt+ip_pktlen+1]  +14
+
         ' send the packet
         nic.start_frame
-        nic.wr_frame_data(pkt,pkt_len+14)
+        nic.wr_frame_data(pkt,pkt_len)
          
         nic.calc_frame_ip_length
-        nic.calc_checksum(icmp_type+2, pkt_len+14, icmp_cksum)
+        nic.calc_checksum(icmp_type+2, pkt_len, icmp_cksum)
         nic.calc_frame_ip_checksum
 
         ' send the packet
@@ -363,26 +366,18 @@ PRI send_bootp_request | i, pkt_len
 
   nic.wr_frame_word($00) ' padding
 
-  repeat i from 0 to 3
-    nic.wr_frame(ip_addr[i]) 'ciaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'yiaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'siaddr
-  repeat i from 0 to 3
-    nic.wr_frame(0) 'giaddr
+  nic.wr_frame_data(@ip_addr,4) 'ciaddr
+  nic.wr_frame_pad(4) 'yiaddr
+  nic.wr_frame_pad(4) 'siaddr
+  nic.wr_frame_pad(4) 'giaddr
 
   ' source mac address
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
-  repeat i from 0 to 9
-    nic.wr_frame(0)
+  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_pad(10)
 
-  repeat i from 0 to 63
-    nic.wr_frame(0) 'sname
+  nic.wr_frame_pad(64)
 
-  repeat i from 0 to 127
-    nic.wr_frame(0) ' file
+  nic.wr_frame_pad(128)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -399,16 +394,13 @@ PRI send_bootp_request | i, pkt_len
   nic.wr_frame(61)
   nic.wr_frame($07)
   nic.wr_frame($01)
-  repeat i from 0 to 5
-    nic.wr_frame(local_macaddr[i])
+  nic.wr_frame_data(@local_macaddr,6)
 
   ' End of vendor data
   nic.wr_frame($FF)
 
-  repeat i from 0 to 46
-    nic.wr_frame(0) 'vend
+  nic.wr_frame_pad(46)
 
-  'nic.calc_frame_ip_length
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
   
@@ -554,20 +546,20 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
             01 : bytemove(@ip_subnet,ptr+2,4)
             03 : bytemove(@ip_gateway,ptr+2,4)
             06 : bytemove(@ip_dns,ptr+2,4)
-            23 : ' Default IP TTL
-            28 : ' Broadcast address
-            37 : ' Default TCP TTL
-            42 : ' NTP Servers
+            '23 : ' Default IP TTL
+            '28 : ' Broadcast address
+            '37 : ' Default TCP TTL
+            '42 : ' NTP Servers
             51 :
               bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
               ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
               ip_dhcp_expire>>=2
               ip_dhcp_expire+=long[RTCADDR]
-            53 : ' DHCP message type
-              'if byte[ptr+2]==2
-                'TODO: This is a DHCP Offer. We need to send a formal DHCP request.
-                'dhcp_offer_response 
-            58 : ' DHCP renewal time
+            '53 : ' DHCP message type
+            '  'if byte[ptr+2]==2
+            '    'TODO: This is a DHCP Offer. We need to send a formal DHCP request.
+            '    'dhcp_offer_response 
+            '58 : ' DHCP renewal time
             '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
             '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
             '  ip_dhcp_expire+=long[RTCADDR]
@@ -587,7 +579,7 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
       settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
       
         
-PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
+PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
   ' Handles incoming TCP packets
 
   srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
@@ -605,17 +597,45 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, established session
     BYTE[handle_addr + sConState] := SESTABLISHED
-    
+
+    if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+      ' ACK response
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_ACK)
+      send_tcpfinal(handle_addr, 0)
+      abort  ' Bad sequence Num!
+
+    if datain_len > buffer_length
+      ' ACK response
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_ACK)
+      send_tcpfinal(handle_addr, 0)
+      abort
+    {
+    if (WORD[@rx_head] > WORD[@rx_tail] ) AND (datain_len > (buffer_length-(WORD[@rx_head]-WORD[@rx_tail])))
+      abort
+    if (WORD[@rx_head] < WORD[@rx_tail] ) AND (datain_len > (buffer_length-(WORD[@rx_tail]-WORD[@rx_head])))
+      abort
+    }  
+
+    head_work := WORD[@rx_head][handle]
+
     ' copy data to buffer
     repeat i from 0 to datain_len - 1
-      if (BYTE[@rx_tail][handle] <> (BYTE[@rx_head][handle] + 1) & buffer_mask)
+      if (WORD[@rx_tail][handle] <> (head_work + 1) & buffer_mask)
         ptr := @rx_buffer + (handle * buffer_length)  
-        byte[ptr][BYTE[@rx_head][handle]] := BYTE[pkt][TCP_data + i]
-        BYTE[@rx_head][handle] := (BYTE[@rx_head][handle] + 1) & buffer_mask
+        byte[ptr][head_work] := BYTE[pkt][TCP_data + i]
+        head_work := (head_work + 1) & buffer_mask
       else
-        quit  ' out of space!
+        ' ACK response
+        build_ipheaderskeleton(handle_addr)
+        build_tcpskeleton(handle_addr, TCP_ACK)
+        send_tcpfinal(handle_addr, 0)
+        abort  ' out of space!
+
+    WORD[@rx_head][handle]:=head_work
      
-    ' recalculate ack number
+    ' recalculate ack Num
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
 
     ' ACK response
@@ -630,6 +650,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
     
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+
 
     ' ACK response
     build_ipheaderskeleton(handle_addr)
@@ -715,7 +736,7 @@ PRI build_ipheaderskeleton(handle_addr) | hdrlen, hdr_chksum
   BYTE[pkt][ip_frag_offset] := $40                                              ' Don't fragment
   BYTE[pkt][constant(ip_frag_offset + 1)] := 0
   
-  BYTE[pkt][ip_ttl] := $80                                                      ' TTL = 128
+  BYTE[pkt][ip_ttl] := ip_maxhops
 
   BYTE[pkt][ip_proto] := $06                                                    ' TCP protocol
 
@@ -731,8 +752,8 @@ PRI build_tcpskeleton(handle_addr, flags)
   
   BYTE[pkt][constant(TCP_hdrflags + 1)] := flags                                ' TCP state flags
 
-  BYTE[pkt][TCP_window] := constant((buffer_length & $FF00) >> 8)               ' Window size (max data that can be received before ACK must be sent)
-  BYTE[pkt][constant(TCP_window + 1)] := constant(buffer_length & $FF)          '  we use our buffer_length to ensure our buffer won't get overloaded
+  BYTE[pkt][TCP_window] := constant(((buffer_length) & $FF00) >> 8)               ' Window size (max data that can be received before ACK must be sent)
+  BYTE[pkt][constant(TCP_window + 1)] := constant((buffer_length) & $FF)          '  we use our buffer_length to ensure our buffer won't get overloaded
                                                                                 '  may cause slowness so some people may want to use $FFFF on high latency networks
   
 PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
@@ -744,13 +765,13 @@ PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
   BYTE[pkt][ip_pktlen] := tcplen >> 8
   BYTE[pkt][constant(ip_pktlen + 1)] := tcplen
 
-  ' calc ip header checksum
+  ' ip header checksum (Calculated in hardware)
   BYTE[pkt][ip_hdr_cksum] := $00
   BYTE[pkt][constant(ip_hdr_cksum + 1)] := $00
-  hdrlen := (BYTE[pkt][ip_vers_len] & $0F) * 4
-  hdr_chksum := calc_chksum(@BYTE[pkt][ip_vers_len], hdrlen)  
-  BYTE[pkt][ip_hdr_cksum] := hdr_chksum >> 8
-  BYTE[pkt][constant(ip_hdr_cksum + 1)] := hdr_chksum
+  'hdrlen := (BYTE[pkt][ip_vers_len] & $0F) * 4
+  'hdr_chksum := calc_chksum(@BYTE[pkt][ip_vers_len], hdrlen)  
+  'BYTE[pkt][ip_hdr_cksum] := hdr_chksum >> 8
+  'BYTE[pkt][constant(ip_hdr_cksum + 1)] := hdr_chksum
 
   ' calc checksum
   BYTE[pkt][TCP_cksum] := $00
@@ -774,11 +795,8 @@ PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
     
   ' send the packet
   nic.start_frame
-  
-  repeat i from 0 to tcplen - 1
-    nic.wr_frame(BYTE[pkt][i])
-
-  ' send the packet
+  nic.wr_frame_data(pkt,tcplen)
+  nic.calc_frame_ip_checksum
   nic.send_frame
 
 
@@ -823,10 +841,10 @@ PRI tick_tcpsend | i, ptr, handle, handle_addr
       
       i := 0
       repeat
-        if BYTE[@tx_tail][handle] <> BYTE[@tx_head][handle]
+        if WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
           ptr := @tx_buffer + (handle * buffer_length)
-          BYTE[pkt][TCP_data + i] := byte[ptr][BYTE[@tx_tail][handle]]
-          BYTE[@tx_tail][handle] := (BYTE[@tx_tail][handle] + 1) & buffer_mask
+          BYTE[pkt][TCP_data + i] := byte[ptr][WORD[@tx_tail][handle]]
+          WORD[@tx_tail][handle] := (WORD[@tx_tail][handle] + 1) & buffer_mask
           ++i
         else
           quit  ' no data left
@@ -949,7 +967,7 @@ PUB connect(ip, remoteport, localport) | handle_addr
     return -1
 
   ' copy in ip, port data (with respect to the remote host, since we use same code as server)
-  LONG[handle_addr + sSrcIp] := ip
+  LONG[handle_addr + sSrcIp] := LONG[ip]
   WORD[handle_addr + sSrcPort] := conv_endianword(remoteport)
   WORD[handle_addr + sDstPort] := conv_endianword(localport)
 
@@ -991,10 +1009,10 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Will not block (returns -1 if no byte avail)
 
   rxbyte := -1
-  if BYTE[@rx_tail][handle] <> BYTE[@rx_head][handle]
+  if WORD[@rx_tail][handle] <> WORD[@rx_head][handle]
     ptr := @rx_buffer + (handle * buffer_length)
-    rxbyte := byte[ptr][BYTE[@rx_tail][handle]]
-    BYTE[@rx_tail][handle] := (BYTE[@rx_tail][handle] + 1) & buffer_mask
+    rxbyte := byte[ptr][WORD[@rx_tail][handle]]
+    WORD[@rx_tail][handle] := (WORD[@rx_tail][handle] + 1) & buffer_mask
     
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
@@ -1006,12 +1024,12 @@ PUB writeByteNonBlocking(handle, txbyte) | ptr
 '' Writes a byte to the specified socket
 '' Will not block (returns -1 if no buffer space available)
 
-  ifnot (BYTE[@tx_tail][handle] <> (BYTE[@tx_head][handle] + 1) & buffer_mask)
+  ifnot (WORD[@tx_tail][handle] <> (WORD[@tx_head][handle] + 1) & buffer_mask)
     return -1
 
   ptr := @tx_buffer + (handle * buffer_length)  
-  byte[ptr][BYTE[@tx_head][handle]] := txbyte
-  BYTE[@tx_head][handle] := (BYTE[@tx_head][handle] + 1) & buffer_mask
+  byte[ptr][WORD[@tx_head][handle]] := txbyte
+  WORD[@tx_head][handle] := (WORD[@tx_head][handle] + 1) & buffer_mask
 
   return txbyte
 
@@ -1024,8 +1042,8 @@ PUB writeByte(handle, txbyte)
 PUB resetBuffers(handle)
 '' Resets send/receive buffers for the specified socket
 
-  BYTE[@rx_tail][handle] := BYTE[@rx_head][handle]
-  BYTE[@tx_head][handle] := BYTE[@tx_tail][handle]    
+  WORD[@rx_tail][handle] := WORD[@rx_head][handle]
+  WORD[@tx_head][handle] := WORD[@tx_tail][handle]    
 
 CON
 ' The following is an 'array' that represents all the socket handle data (with respect to the remote host)
@@ -1048,7 +1066,7 @@ CON
 ' Offsets for socket status arrays
   sMySeqNum = 0
   sMyAckNum = 4
-  sSrcIp = 8
+  sSrcIp = 8 
   sSrcPort = 12
   sDstPort = 14
   sConState = 16
@@ -1071,29 +1089,86 @@ DAT
 sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
               byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
 
+
 CON
 ' Circular Buffer constants
-  buffer_length = 128
+  buffer_length = 1024 '128
   buffer_mask   = buffer_length - 1
 
 DAT
 ' Circular buffer variables (one long per socket)
 '             Socket:   [           1            ] [           2            ]
-rx_head       byte      0                        , buffer_length
-rx_tail       byte      0                        , buffer_length
-tx_head       byte      0                        , buffer_length
-tx_tail       byte      0                        , buffer_length
+rx_head       word      0                        , buffer_length
+rx_tail       word      0                        , buffer_length
+tx_head       word      0                        , buffer_length
+tx_tail       word      0                        , buffer_length
 
 tx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
 rx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
+              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
 

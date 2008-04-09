@@ -76,7 +76,8 @@ DAT
   int             byte 0
                   
   packetheader    byte 0[6]
-
+        
+                  long 0 ' For allignment
   packet          byte 0[MAXFRAME]
 
 PUB start(i_cs, i_sck, i_si, i_so, i_int, xtalout, macptr)
@@ -417,7 +418,7 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
 
   i:=0
 
-  delay_us(150)
+  delay_us(150) ' Too conservative...?
 
   if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
     return 0

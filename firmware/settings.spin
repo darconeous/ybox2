@@ -15,8 +15,7 @@ CON
   _xinfreq = 5_000_000                                                      
   EEPROMPageSize = 128
 
-  SettingsLockPtr = $6FFF
-  SettingsPtr = $7000
+  SettingsPtr = $7800
   SettingsSize = $800
 
 
@@ -31,35 +30,37 @@ CON
   
   MISC_CONFIGURED_FLAG = $0300 
   MISC_PASSWORD = $0301 
-
+  MISC_AUTOBOOT = $0302
+  
   SERVER_IPv4_ADDR = $0400 
   SERVER_IPv4_PORT = $0401 
   SERVER_PATH = $0402 
   SERVER_HOST = $0403 
-
+DAT
+SettingsLock  byte      -1
 OBJ
   eeprom : "Basic_I2C_Driver"
 PUB start
-  if(byte[SettingsLockPtr] := locknew) == -1
+  if(SettingsLock := locknew) == -1
     abort FALSE
   return TRUE
   
 PUB stop
-  lockret(byte[SettingsLockPtr])
-  byte[SettingsLockPtr] := -1
+  lockret(SettingsLock)
+  SettingsLock := -1
 PRI lock
-  repeat while NOT lockset(byte[SettingsLockPtr])
+  repeat while NOT lockset(SettingsLock)
 PRI unlock
-  lockclr(byte[SettingsLockPtr])
+  lockclr(SettingsLock)
 PUB commit | addr, i
   lock
   addr := SettingsPtr & %11111111_10000000
   eeprom.Initialize(eeprom#BootPin)
   repeat i from 0 to SettingsSize/EEPROMPageSize
-    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr)
     if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, EEPROMPageSize)
       unlock
       abort FALSE
+    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr)
     addr+=EEPROMPageSize
   unlock
 

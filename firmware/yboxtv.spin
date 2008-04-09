@@ -29,7 +29,7 @@ VAR
 PUB init | i
   outa[0]:=0
   dira[0]:=1
-  dira[8]:=1
+  dira[subsys#SPKRPin]:=1
   
   settings.start
   subsys.init
@@ -49,9 +49,9 @@ PUB init | i
       reboot
          
   if settings.findKey(settings#SOUND_DISABLE) == FALSE
-    dira[8]:=1
+    dira[subsys#SPKRPin]:=1
   else
-    dira[8]:=0
+    dira[subsys#SPKRPin]:=0
   
   dira[0]:=0
 
@@ -181,13 +181,13 @@ PUB main | ircode
       if settings.findKey(settings#SOUND_DISABLE) == FALSE
         showMessage(string("[MUTED]"))    
         settings.setByte(settings#SOUND_DISABLE,TRUE)
-        dira[8]:=0       
+        dira[subsys#SPKRPin]:=0       
         settings.commit
         ir.fifo_flush
       else
         showMessage(string("[UNMUTED]"))    
         settings.removeData(settings#SOUND_DISABLE)
-        dira[8]:=1       
+        dira[subsys#SPKRPin]:=1       
         HappyChirp
         settings.commit
         ir.fifo_flush
@@ -212,10 +212,12 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in
     if port > 30000
       port := 20000
 
-    tel.connect(settings.getLong(settings#SERVER_IPv4_ADDR),settings.getWord(settings#SERVER_IPv4_PORT),port)
+    addr := settings.getLong(settings#SERVER_IPv4_ADDR)
+    if tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
+      next
     
     term.str(string($1,$A,39,$C,1," ",$C,$8))
-    
+  
     tel.resetBuffers
     
     settings.getString(settings#SERVER_PATH,@path_holder,64)
@@ -285,21 +287,21 @@ pub HappyChirp | TMP,TMP2
   TMP:=25
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=400
     repeat while TMP2
       TMP2--
   TMP:=30
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=350
     repeat while TMP2
       TMP2--
   TMP:=35
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=300
     repeat while TMP2
       TMP2--
@@ -308,21 +310,21 @@ pub SadChirp | TMP,TMP2
   TMP:=35
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=300
     repeat while TMP2
       TMP2--
   TMP:=30
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=350
     repeat while TMP2
       TMP2--
   TMP:=25
   repeat while TMP
     TMP--
-    outa[8]:=!outa[8]  
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     TMP2:=400
     repeat while TMP2
       TMP2--
