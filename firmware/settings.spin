@@ -27,23 +27,22 @@ CON
   SettingsTop = $8000 - 1
   SettingsBottom = SettingsTop - (SettingsSize-1)
 
-  NET_MAC_ADDR  = $0100
-  NET_IPv4_ADDR = $0101
-  NET_IPv4_MASK = $0102
-  NET_IPv4_GATE = $0103
-  NET_IPv4_DNS  = $0104
-  NET_DHCPv4_DISABLE = $0105
+  MISC_UUID          = ("I"<<8) + "D"
+  MISC_PASSWORD      = ("P"<<8) + "W"
+  MISC_AUTOBOOT      = ("A"<<8) + "B"
+  MISC_SOUND_DISABLE = ("s"<<8) + "-"
+
+  NET_MAC_ADDR       = ("E"<<8) + "A"
+  NET_IPv4_ADDR      = ("4"<<8) + "A"
+  NET_IPv4_MASK      = ("4"<<8) + "M"
+  NET_IPv4_GATE      = ("4"<<8) + "G"
+  NET_IPv4_DNS       = ("4"<<8) + "D"
+  NET_DHCPv4_DISABLE = ("4"<<8) + "d"
   
-  SOUND_DISABLE = $0200
-  
-  MISC_CONFIGURED_FLAG = $0300 
-  MISC_PASSWORD = $0301 
-  MISC_AUTOBOOT = $0302
-  
-  SERVER_IPv4_ADDR = $0400 
-  SERVER_IPv4_PORT = $0401 
-  SERVER_PATH = $0402 
-  SERVER_HOST = $0403 
+  SERVER_IPv4_ADDR   = ("S"<<8) + "A" 
+  SERVER_IPv4_PORT   = ("S"<<8) + "P" 
+  SERVER_PATH        = ("S"<<8) + "T" 
+  SERVER_HOST        = ("S"<<8) + "H" 
 DAT
 SettingsLock  byte      -1
 OBJ
@@ -54,7 +53,7 @@ PUB start | i,addr
 
   addr := SettingsBottom & %11111111_10000000
   eeprom.Initialize(eeprom#BootPin)
-  repeat i from 0 to SettingsSize/EEPROMPageSize
+  repeat i from 0 to SettingsSize/EEPROMPageSize-1
     eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
     addr+=EEPROMPageSize
   return TRUE
@@ -70,13 +69,19 @@ PUB commit | addr, i
   lock
   addr := SettingsBottom & %11111111_10000000
   eeprom.Initialize(eeprom#BootPin)
-  repeat i from 0 to SettingsSize/EEPROMPageSize
+  repeat i from 0 to SettingsSize/EEPROMPageSize-1
     if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, EEPROMPageSize)
       unlock
       abort FALSE
     repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+$8000)
     addr+=EEPROMPageSize
   unlock
+
+PUB size | iter
+  iter := SettingsTop
+  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+    iter-=4+((byte[iter-2]+1) & !1)
+  return SettingsTop-iter
 
 PRI findKey_(key) | iter
   iter := SettingsTop
@@ -90,18 +95,18 @@ PUB findKey(key) | retVal
   retVal:=findKey_(key)
   unlock
   return retVal
-PUB getData(key,ptr,size) | iter
+PUB getData(key,ptr,size_) | iter
   lock
   iter := findKey_(key)
   if iter
-    if byte[iter-2] < size
-      size := byte[iter-2]
+    if byte[iter-2] < size_
+      size_ := byte[iter-2]
     
-    bytemove(ptr, iter-3-byte[iter-2], size)
+    bytemove(ptr, iter-3-byte[iter-2], size_)
   else
-    size:=0
+    size_:=0
   unlock
-  return size
+  return size_
 PUB removeData(key) | iter, nextKey
   lock
   iter := findKey_(key)
@@ -110,27 +115,27 @@ PUB removeData(key) | iter, nextKey
     bytemove(SettingsBottom+iter-nextKey+1,SettingsBottom, nextKey-SettingsBottom)
   unlock
   return iter
-PUB setData(key,ptr,size) | iter
+PUB setData(key,ptr,size_) | iter
   removeData(key)
   lock
   iter := SettingsTop
-  if size>255
+  if size_>255
     abort FALSE
   repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
     iter-=4+((byte[iter-2]+1) & !1)
-  if iter-3-size<SettingsBottom
+  if iter-3-size_<SettingsBottom
     unlock
     abort FALSE
   word[iter]:=key
-  byte[iter-2]:=size
-  byte[iter-3]:=!size
-  bytemove(iter-3-size,ptr,size)
+  byte[iter-2]:=size_
+  byte[iter-3]:=!size_
+  bytemove(iter-3-size_,ptr,size_)
   unlock
   return iter
 
-PUB getString(key,ptr,size) | strlen
+PUB getString(key,ptr,size_) | strlen
   ' Strings must be zero terminated.
-  strlen:=getData(key,ptr,size-1)
+  strlen:=getData(key,ptr,size_-1)
   byte[ptr][strlen]:=0  
   return strlen
   

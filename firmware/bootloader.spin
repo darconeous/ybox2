@@ -20,10 +20,10 @@ OBJ
   subsys        : "subsys"
   settings      : "settings"
   eeprom        : "Basic_I2C_Driver"
+  random        : "RealRandom"
                                      
 VAR
-  long weatherstack[40] 
-  byte path_holder[64]
+  byte stack[40] 
   
 PUB init | i
   'cognew(@bootstage2,0)
@@ -47,7 +47,7 @@ PUB init | i
     if NOT ina[subsys#BTTNPin]
       boot_stage2
 
-  if NOT settings.findKey(settings#MISC_CONFIGURED_FLAG)
+  if NOT settings.size
     if NOT \initial_configuration
       showMessage(string("Initial configuration failed!"))
       subsys.StatusFatalError
@@ -64,15 +64,15 @@ PUB init | i
   waitcnt(clkfreq*100000 + cnt)
 }
    
-  if settings.getData(settings#NET_MAC_ADDR,@weatherstack,6)
+  if settings.getData(settings#NET_MAC_ADDR,@stack,6)
     term.str(string("MAC: "))
     repeat i from 0 to 5
       if i
         term.out("-")
-      term.hex(byte[@weatherstack][i],2)
+      term.hex(byte[@stack][i],2)
     term.out(13)  
-         
-  if settings.findKey(settings#SOUND_DISABLE) == FALSE
+
+  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
     dira[subsys#SPKRPin]:=1
   else
     dira[subsys#SPKRPin]:=0
@@ -88,48 +88,26 @@ PUB init | i
 
   HappyChirp
 
-  if NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
+  if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
     term.str(string("Waiting for IP address...",13))
-    repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
+    repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
       delay_ms(500)
 
   term.str(string("IPv4 ADDR:"))
   repeat i from 0 to 3
     if i
       term.out(".")
-    term.dec(byte[@weatherstack][i])
+    term.dec(byte[@stack][i])
   term.out(13)  
 
-  if settings.getData(settings#NET_IPv4_DNS,@weatherstack,4)
+  if settings.getData(settings#NET_IPv4_DNS,@stack,4)
     term.str(string("DNS ADDR:"))
     repeat i from 0 to 3
       if i
         term.out(".")
-      term.dec(byte[@weatherstack][i])
+      term.dec(byte[@stack][i])
     term.out(13)  
-
-  if settings.getData(settings#SERVER_IPv4_ADDR,@weatherstack,4)
-    term.str(string("SERVER ADDR:"))
-    repeat i from 0 to 3
-      if i
-        term.out(".")
-      term.dec(byte[@weatherstack][i])
-    term.out(":")  
-    term.dec(settings.getWord(settings#SERVER_IPv4_PORT))
-    term.out(13)  
-
-  if settings.getString(settings#SERVER_PATH,@weatherstack,40)
-    term.str(string("SERVER PATH:'"))
-    term.str(@weatherstack)
-    term.str(string("'",13))
-
-  if settings.getString(settings#SERVER_HOST,@weatherstack,40)
-    term.str(string("SERVER HOST:'"))
-    term.str(@weatherstack)
-    term.str(string("'",13))
-
    
-  'main
   downloadFirmware
   
 PRI boot_stage2
@@ -139,18 +117,26 @@ PRI boot_stage2
   tel.stop
   ' Replace this cog with the bootloader
   coginit(cogid,@bootstage2,0)
-PRI initial_configuration
+PRI initial_configuration | i
   term.str(string("First boot!",13))
 
-  ' Mark outselves as configured so we know we don't have to repeat this step.
-  settings.setByte(settings#MISC_CONFIGURED_FLAG,TRUE)
+  random.start
+
+  ' Make a random UUID
+  repeat i from 0 to 16
+    stack[i] := random.random
+  settings.setData(settings#MISC_UUID,@stack,16)
+
+  ' Make a random MAC Address
+  stack[0] := $02
+  repeat i from 1 to 5
+    stack[i] := random.random
+  settings.setData(settings#NET_MAC_ADDR,@stack,6)
+
+  random.stop
 
   settings.setString(settings#MISC_PASSWORD,string("password"))  
 
-  ' If the mac address is left undefined, a random
-  ' one will be chosen on the first boot. This is
-  ' safe to leave commented out.
-  'settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
   
   ' Uncomment and change these settings if you don't want to use DHCP
   {
@@ -165,11 +151,6 @@ PRI initial_configuration
   'settings.setByte(settings#SOUND_DISABLE,TRUE)
 
   'settings.setByte(settings#MISC_AUTOBOOT,TRUE)
-  
-  settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
-  settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
-  settings.setWord(settings#SERVER_IPv4_PORT,80)
-  settings.setString(settings#SERVER_PATH,string("/?id=124932&pass=sunplant"))
 
   settings.commit
   return TRUE

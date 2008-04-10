@@ -91,12 +91,7 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   randseed := random.random
   random.stop
 
-  ' If we don't have an explicit mac address set, we need to make one!
-  if settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6) == FALSE
-    generate_macaddr
-    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
-    settings.commit
-
+  settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6)
   settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
   settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
   settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
@@ -106,9 +101,9 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   if settings.findKey(settings#NET_DHCPv4_DISABLE)
     long[ip_dhcp_expire]:=$7FFFFFFF
   else
-  settings.removeData(settings#NET_IPv4_ADDR)
-  settings.removeData(settings#NET_IPv4_MASK)
-  settings.removeData(settings#NET_IPv4_GATE)
+    settings.removeData(settings#NET_IPv4_ADDR)
+    settings.removeData(settings#NET_IPv4_MASK)
+    settings.removeData(settings#NET_IPv4_GATE)
   
     
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
@@ -119,16 +114,6 @@ PUB stop
   if cog
     cogstop(cog~ - 1)           ' stop the tcp engine
   nic.stop                    ' stop nic driver (kills spi engine)
-
-PRI generate_macaddr
-  random.start
-  local_macaddr[0] := $02
-  local_macaddr[1] := random.random
-  local_macaddr[2] := random.random
-  local_macaddr[3] := random.random
-  local_macaddr[4] := random.random
-  local_macaddr[5] := random.random
-  random.stop
 
 PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
 

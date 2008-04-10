@@ -35,18 +35,24 @@ PUB Stop
   if subsyscog
     cogstop(subsyscog~ - 1)
     subsyscog:=0
+  StatusOff
   if modecog
     cogstop(modecog~ - 1)
     modecog:=0
+PUB StatusOff
+  if modecog
+    cogstop(modecog~ - 1)
+    modecog:=0
+
 PUB StatusIdle
-  stop
+  StatusOff
   modecog := cognew(ColorCycle, @stack) + 1 
 PUB StatusLoading
-  stop
+  StatusOff
   modecog := cognew(LoadingCycle, @stack) + 1 
 
 PUB StatusFatalError
-  stop
+  StatusOff
   modecog := cognew(FatalErrorCycle, @stack) + 1 
 PUB FatalErrorCycle
   LED_R:=0

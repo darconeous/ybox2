@@ -34,24 +34,24 @@ PUB init | i
   settings.start
   subsys.init
   term.start(12)
-  term.str(string(13,"ybox2",13,"http://www.deepdarc.com/ybox2/",13,13))
+  term.str(string(13,"ybox2 weather",13,"http://www.deepdarc.com/ybox2/",13,13))
 
   subsys.StatusLoading
 
   ir.init(15, 0, 300, 1)
-
-  if NOT settings.findKey(settings#MISC_CONFIGURED_FLAG)
-    if NOT \initial_configuration
-      showMessage(string("Initial configuration failed!"))
-      subsys.StatusFatalError
-      SadChirp
-      waitcnt(clkfreq*10000 + cnt)
-      reboot
          
-  if settings.findKey(settings#SOUND_DISABLE) == FALSE
+  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
     dira[subsys#SPKRPin]:=1
   else
     dira[subsys#SPKRPin]:=0
+
+  if NOT settings.findKey(settings#SERVER_PATH)
+    if NOT \initial_configuration
+      showMessage(string("Server configuration failed!"))
+      subsys.StatusFatalError
+      SadChirp
+      waitcnt(clkfreq*100000 + cnt)
+      reboot
   
   dira[0]:=0
 
@@ -114,29 +114,6 @@ PUB init | i
    
   main
 PRI initial_configuration
-  term.str(string("First boot!",13))
-
-  ' Mark outselves as configured so we know we don't have to repeat this step.
-  settings.setByte(settings#MISC_CONFIGURED_FLAG,TRUE)
-
-  settings.setString(settings#MISC_PASSWORD,string("password"))  
-
-  ' If the mac address is left undefined, a random
-  ' one will be chosen on the first boot. This is
-  ' safe to leave commented out.
-  settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
-
-  ' Uncomment and change these settings if you don't want to use DHCP
-  {
-  settings.setByte(settings#NET_DHCP_DISABLE,TRUE)
-  settings.setData(settings#NET_IPv4_ADDR,string(192,168,2,10),4)
-  settings.setData(settings#NET_IPv4_MASK,string(255,255,255,0),4)
-  settings.setData(settings#NET_IPv4_GATE,string(192,168,2,1),4)
-  settings.setData(settings#NET_IPv4_DNS,string(4,2,2,4),4)
-  }
-
-  ' If you want sound off by default, uncomment the next line
-  settings.setByte(settings#SOUND_DISABLE,TRUE)
   
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
@@ -178,15 +155,15 @@ PUB main | ircode
       term.stop
       term.start(12)
     if ircode == $64
-      if settings.findKey(settings#SOUND_DISABLE) == FALSE
+      if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
         showMessage(string("[MUTED]"))    
-        settings.setByte(settings#SOUND_DISABLE,TRUE)
+        settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
         dira[subsys#SPKRPin]:=0       
         settings.commit
         ir.fifo_flush
       else
         showMessage(string("[UNMUTED]"))    
-        settings.removeData(settings#SOUND_DISABLE)
+        settings.removeData(settings#MISC_SOUND_DISABLE)
         dira[subsys#SPKRPin]:=1       
         HappyChirp
         settings.commit
