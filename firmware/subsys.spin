@@ -54,6 +54,12 @@ PUB StatusLoading
 PUB StatusFatalError
   StatusOff
   modecog := cognew(FatalErrorCycle, @stack) + 1 
+
+PUB StatusSolid(r,g,b)
+  StatusOff
+  LED_R:=r
+  LED_G:=g
+  LED_B:=b
 PUB FatalErrorCycle
   LED_R:=0
   LED_G:=0

@@ -24,6 +24,7 @@ OBJ
                                      
 VAR
   byte stack[40] 
+  byte stage_two
   
 PUB init | i
   'cognew(@bootstage2,0)
@@ -41,6 +42,13 @@ PUB init | i
   subsys.StatusLoading
 
   settings.start
+
+  if settings.findKey(settings#MISC_STAGE_TWO)
+    stage_two := TRUE
+    settings.removeData(settings#MISC_STAGE_TWO)
+  else
+    stage_two := FALSE
+  'stage_two := TRUE
 
   if settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
@@ -107,10 +115,16 @@ PUB init | i
         term.out(".")
       term.dec(byte[@stack][i])
     term.out(13)  
-   
+
+  if stage_two
+    subsys.StatusSolid(255,255,255)
+  else
+    subsys.StatusIdle
+ 
   downloadFirmware
   
 PRI boot_stage2
+  settings.setByte(settings#MISC_STAGE_TWO,TRUE)
   subsys.stop
   settings.stop
   term.stop
@@ -171,14 +185,21 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
     tel.waitConnectTimeout(100)
     if ina[subsys#BTTNPin]
       boot_stage2
-      
+
+  subsys.StatusLoading
+    
   term.str(string("Connected",13))
 
   tel.str(string("ybox2",13))
 
   i:=0
   total:=0
-  addr:=$8000
+  
+  if stage_two
+    addr:=$0000 ' Stage two writes to the lower 32KB
+  else
+    addr:=$8000 ' Stage one writes to the upper 32KB
+  
   repeat
     if (in := tel.rxcheck) => 0
       buffer[i++] := in
@@ -203,8 +224,12 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
         term.str(string("done.",13))
         term.dec(total)
         term.str(string(" bytes written"))
+        subsys.StatusSolid(0,255,0)
         delay_ms(5000)     ' 5 sec delay
-        boot_stage2
+        if stage_two
+          reboot
+        else
+          boot_stage2
 
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
@@ -328,7 +353,7 @@ ee_read                 mov     address,h8000           'reset address to $8000,
                         call    #ee_start
         if_c            jmp     #shutdown               'if no ack, shutdown
 
-                        mov     count,h8000             'set count to $8000
+                        mov     count,programsize             'set count to programsize
 
 ee_read_ret             ret
 '
@@ -450,6 +475,7 @@ zero                    long    0
 smode                   long    0
 hFFF9FFFF               long    $FFF9FFFF
 h8000                   long    $8000
+programsize             long    $8000-settings#SettingsSize
 interpreter             long    $0001 << 18 + $3C01 << 4 + %0000
 '
 '

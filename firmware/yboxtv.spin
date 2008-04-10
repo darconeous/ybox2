@@ -38,6 +38,9 @@ PUB init | i
 
   subsys.StatusLoading
 
+  if settings.findKey(settings#MISC_STAGE_TWO)
+    settings.removeData(settings#MISC_STAGE_TWO)
+
   ir.init(15, 0, 300, 1)
          
   if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE

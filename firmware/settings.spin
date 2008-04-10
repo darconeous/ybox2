@@ -32,6 +32,8 @@ CON
   MISC_AUTOBOOT      = ("A"<<8) + "B"
   MISC_SOUND_DISABLE = ("s"<<8) + "-"
 
+  MISC_STAGE_TWO     = ("S"<<8) + "2"
+
   NET_MAC_ADDR       = ("E"<<8) + "A"
   NET_IPv4_ADDR      = ("4"<<8) + "A"
   NET_IPv4_MASK      = ("4"<<8) + "M"
@@ -51,11 +53,12 @@ PUB start | i,addr
   if(SettingsLock := locknew) == -1
     abort FALSE
 
-  addr := SettingsBottom & %11111111_10000000
-  eeprom.Initialize(eeprom#BootPin)
-  repeat i from 0 to SettingsSize/EEPROMPageSize-1
-    eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
-    addr+=EEPROMPageSize
+  if not size
+    addr := SettingsBottom & %11111111_10000000
+    eeprom.Initialize(eeprom#BootPin)
+    repeat i from 0 to SettingsSize/EEPROMPageSize-1
+      eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
+      addr+=EEPROMPageSize
   return TRUE
    
 PUB stop
