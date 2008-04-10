@@ -17,11 +17,9 @@ OBJ
 
   tel           : "api_telnet_serial"
   term          : "TV_Text"
-  timer         : "timer"
-  ir            : "ir_reader_sony"
   subsys        : "subsys"
   settings      : "settings"
-  eeprom : "Basic_I2C_Driver"
+  eeprom        : "Basic_I2C_Driver"
                                      
 VAR
   long weatherstack[40] 
@@ -35,7 +33,6 @@ PUB init | i
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
   
-  settings.start
 
   subsys.init
   term.start(12)
@@ -43,19 +40,37 @@ PUB init | i
 
   subsys.StatusLoading
 
+  settings.start
+
   if settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
-    boot_stage2
-  
-  ir.init(15, 0, 300, 1)
+    if NOT ina[subsys#BTTNPin]
+      boot_stage2
 
   if NOT settings.findKey(settings#MISC_CONFIGURED_FLAG)
     if NOT \initial_configuration
       showMessage(string("Initial configuration failed!"))
       subsys.StatusFatalError
       SadChirp
-      waitcnt(clkfreq*10000 + cnt)
+      waitcnt(clkfreq*100000 + cnt)
       reboot
+
+{
+  repeat i from 0 to 127
+    if i
+      term.out(" ")
+    term.hex(byte[$7F80][i],2)
+  term.out(13)  
+  waitcnt(clkfreq*100000 + cnt)
+}
+   
+  if settings.getData(settings#NET_MAC_ADDR,@weatherstack,6)
+    term.str(string("MAC: "))
+    repeat i from 0 to 5
+      if i
+        term.out("-")
+      term.hex(byte[@weatherstack][i],2)
+    term.out(13)  
          
   if settings.findKey(settings#SOUND_DISABLE) == FALSE
     dira[subsys#SPKRPin]:=1
@@ -72,14 +87,6 @@ PUB init | i
     reboot
 
   HappyChirp
-
-  if settings.getData(settings#NET_MAC_ADDR,@weatherstack,6)
-    term.str(string("MAC: "))
-    repeat i from 0 to 5
-      if i
-        term.out("-")
-      term.hex(byte[@weatherstack][i],2)
-    term.out(13)  
 
   if NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
     term.str(string("Waiting for IP address...",13))
@@ -130,8 +137,8 @@ PRI boot_stage2
   settings.stop
   term.stop
   tel.stop
-  cognew(@bootstage2,0)
-  cogstop(cogid)
+  ' Replace this cog with the bootloader
+  coginit(cogid,@bootstage2,0)
 PRI initial_configuration
   term.str(string("First boot!",13))
 
@@ -143,8 +150,8 @@ PRI initial_configuration
   ' If the mac address is left undefined, a random
   ' one will be chosen on the first boot. This is
   ' safe to leave commented out.
-  settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
-
+  'settings.setData(settings#NET_MAC_ADDR,string($02, $FF, $DE, $AD, $BE, $EF),6)
+  
   ' Uncomment and change these settings if you don't want to use DHCP
   {
   settings.setByte(settings#NET_DHCP_DISABLE,TRUE)
@@ -155,9 +162,9 @@ PRI initial_configuration
   }
 
   ' If you want sound off by default, uncomment the next line
-  settings.setByte(settings#SOUND_DISABLE,TRUE)
+  'settings.setByte(settings#SOUND_DISABLE,TRUE)
 
-  settings.setByte(settings#MISC_AUTOBOOT,TRUE)
+  'settings.setByte(settings#MISC_AUTOBOOT,TRUE)
   
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
@@ -180,8 +187,10 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
   tel.resetBuffers
   
   repeat while NOT tel.isConnected
-    tel.waitConnectTimeout(2000)
-
+    tel.waitConnectTimeout(100)
+    if ina[subsys#BTTNPin]
+      boot_stage2
+      
   term.str(string("Connected",13))
 
   tel.str(string("ybox2",13))
@@ -193,17 +202,17 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
     if (in := tel.rxcheck) => 0
       buffer[i++] := in
       if i == 128
-        ' flush to EEPROM
+        ' flush to EEPROM                              
         if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             term.out("E")
         repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
         i:=0
         term.out(".")
-      if total => $8000
+      if total => $8000-settings#SettingsSize
         tel.close
     else
-      ifnot tel.isConnected OR total => $8000
+      ifnot tel.isConnected OR total => $8000-settings#SettingsSize
         if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             term.out("E")
         repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
@@ -214,16 +223,7 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
         term.dec(total)
         term.str(string(" bytes written"))
         delay_ms(5000)     ' 5 sec delay
-        settings.setByte(settings#MISC_AUTOBOOT,TRUE)
-        settings.commit
-        reboot
-{
-      if cnt-timeout>10*clkfreq ' 10 second timeout      
-        subsys.StatusFatalError
-        showMessage(string("Error: Connection Lost!"))    
-        tel.close
-        reboot
-}
+        boot_stage2
 
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    

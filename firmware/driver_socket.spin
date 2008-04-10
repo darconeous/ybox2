@@ -97,15 +97,19 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
     settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)
     settings.commit
 
-  ' If DHCP is disabled, set the expire time to be way in the future. 
-  if settings.findKey(settings#NET_DHCPv4_DISABLE)
-    long[ip_dhcp_expire]:=$7FFFFFFF
-    
   settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
   settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
   settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
   settings.getData(settings#NET_IPv4_DNS,@ip_dns,4)
-
+   
+  ' If DHCP is disabled, set the expire time to be way in the future. 
+  if settings.findKey(settings#NET_DHCPv4_DISABLE)
+    long[ip_dhcp_expire]:=$7FFFFFFF
+  else
+  settings.removeData(settings#NET_IPv4_ADDR)
+  settings.removeData(settings#NET_IPv4_MASK)
+  settings.removeData(settings#NET_IPv4_GATE)
+  
     
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
   return cog

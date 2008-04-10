@@ -24,16 +24,20 @@ LED_R   byte 0
 LED_G   byte 0
 LED_B   byte 0
 modecog byte 0
+subsyscog byte 0
 VAR
   long stack[16] 'Stack space for new cog
 PUB init
-  cognew(@run, @LED_R) 
+  subsyscog := cognew(@run, @LED_R)+1 
   StatusIdle
 
 PUB Stop
+  if subsyscog
+    cogstop(subsyscog~ - 1)
+    subsyscog:=0
   if modecog
     cogstop(modecog~ - 1)
-  
+    modecog:=0
 PUB StatusIdle
   stop
   modecog := cognew(ColorCycle, @stack) + 1 

@@ -8,6 +8,14 @@
         Also allows for some rudamentry cross-object communication.
         It's not terribly fast though, so it should be read-from
         and written-to sparingly.
+
+        Format is as follows
+
+        2 Bytes                 Key Value
+        1 Byte                  Key Length
+        1 Byte                  Check Byte (Ones complement of key length)
+        x Bytes                 Data
+        1 Byte (Optional)       Padding, if size is odd
 }} 
 CON
 
@@ -15,9 +23,9 @@ CON
   _xinfreq = 5_000_000                                                      
   EEPROMPageSize = 128
 
-  SettingsPtr = $7800
-  SettingsSize = $800
-
+  SettingsSize = $400
+  SettingsTop = $8000 - 1
+  SettingsBottom = SettingsTop - (SettingsSize-1)
 
   NET_MAC_ADDR  = $0100
   NET_IPv4_ADDR = $0101
@@ -40,11 +48,17 @@ DAT
 SettingsLock  byte      -1
 OBJ
   eeprom : "Basic_I2C_Driver"
-PUB start
+PUB start | i,addr
   if(SettingsLock := locknew) == -1
     abort FALSE
+
+  addr := SettingsBottom & %11111111_10000000
+  eeprom.Initialize(eeprom#BootPin)
+  repeat i from 0 to SettingsSize/EEPROMPageSize
+    eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
+    addr+=EEPROMPageSize
   return TRUE
-  
+   
 PUB stop
   lockret(SettingsLock)
   SettingsLock := -1
@@ -54,22 +68,22 @@ PRI unlock
   lockclr(SettingsLock)
 PUB commit | addr, i
   lock
-  addr := SettingsPtr & %11111111_10000000
+  addr := SettingsBottom & %11111111_10000000
   eeprom.Initialize(eeprom#BootPin)
   repeat i from 0 to SettingsSize/EEPROMPageSize
-    if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr, addr, EEPROMPageSize)
+    if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, EEPROMPageSize)
       unlock
       abort FALSE
-    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr)
+    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+$8000)
     addr+=EEPROMPageSize
   unlock
 
 PRI findKey_(key) | iter
-  iter := SettingsPtr
-  repeat while (iter < SettingsPtr+SettingsSize) AND word[iter] AND word[iter+2]
+  iter := SettingsTop
+  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
     if word[iter] == key
       return iter
-    iter+=4+((word[iter+2]+1) & !1)
+    iter-=4+((byte[iter-2]+1) & !1)
   return 0
 PUB findKey(key) | retVal
   lock
@@ -80,8 +94,10 @@ PUB getData(key,ptr,size) | iter
   lock
   iter := findKey_(key)
   if iter
-    size#>=word[iter+2]
-    bytemove(ptr, iter+4, size)
+    if byte[iter-2] < size
+      size := byte[iter-2]
+    
+    bytemove(ptr, iter-3-byte[iter-2], size)
   else
     size:=0
   unlock
@@ -90,29 +106,32 @@ PUB removeData(key) | iter, nextKey
   lock
   iter := findKey_(key)
   if iter
-    nextKey := iter+4+word[iter+2]
-    bytemove(iter,nextKey, SettingsSize - (nextKey-SettingsPtr))
+    nextKey := iter-3-byte[iter-2]
+    bytemove(SettingsBottom+iter-nextKey+1,SettingsBottom, nextKey-SettingsBottom)
   unlock
   return iter
 PUB setData(key,ptr,size) | iter
   removeData(key)
   lock
-  iter := SettingsPtr
-  repeat while (iter < SettingsPtr+SettingsSize) AND word[iter] AND word[iter+2]
-    iter+=4+((word[iter+2]+1) & !1)
-  if iter+4+size>SettingsPtr+SettingsSize
+  iter := SettingsTop
+  if size>255
+    abort FALSE
+  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+    iter-=4+((byte[iter-2]+1) & !1)
+  if iter-3-size<SettingsBottom
     unlock
     abort FALSE
   word[iter]:=key
-  word[iter+2]:=size
-  bytemove(iter+4,ptr,size)
+  byte[iter-2]:=size
+  byte[iter-3]:=!size
+  bytemove(iter-3-size,ptr,size)
   unlock
   return iter
 
 PUB getString(key,ptr,size) | strlen
   ' Strings must be zero terminated.
   strlen:=getData(key,ptr,size-1)
-  byte[strlen]:=0  
+  byte[ptr][strlen]:=0  
   return strlen
   
 PUB setString(key,ptr)
