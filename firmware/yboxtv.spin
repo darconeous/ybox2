@@ -39,7 +39,7 @@ PUB init | i
   subsys.StatusLoading
 
   if settings.findKey(settings#MISC_STAGE_TWO)
-    settings.removeData(settings#MISC_STAGE_TWO)
+    settings.removeKey(settings#MISC_STAGE_TWO)
 
   ir.init(15, 0, 300, 1)
          
@@ -162,14 +162,12 @@ PUB main | ircode
         showMessage(string("[MUTED]"))    
         settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
         dira[subsys#SPKRPin]:=0       
-        settings.commit
         ir.fifo_flush
       else
         showMessage(string("[UNMUTED]"))    
-        settings.removeData(settings#MISC_SOUND_DISABLE)
+        settings.removeKey(settings#MISC_SOUND_DISABLE)
         dira[subsys#SPKRPin]:=1       
         HappyChirp
-        settings.commit
         ir.fifo_flush
     if ircode == $35
 '      ether.wr_phy(ether#PHLCON,%0000_1010_1011_0000)
@@ -262,52 +260,17 @@ PUB showMessage(str)
   term.str(str)    
   term.str(string($C,$8))    
 
-pub HappyChirp | TMP,TMP2
+pub HappyChirp | i, j
+  repeat j from 0 to 2
+    repeat i from 0 to 30
+      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
+      delay_ms(1)
+    delay_ms(50)
+pub SadChirp | i
 
-  TMP:=25
-  repeat while TMP
-    TMP--
+  repeat i from 0 to 15
     outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=400
-    repeat while TMP2
-      TMP2--
-  TMP:=30
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=350
-    repeat while TMP2
-      TMP2--
-  TMP:=35
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=300
-    repeat while TMP2
-      TMP2--
-pub SadChirp | TMP,TMP2
-
-  TMP:=35
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=300
-    repeat while TMP2
-      TMP2--
-  TMP:=30
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=350
-    repeat while TMP2
-      TMP2--
-  TMP:=25
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=400
-    repeat while TMP2
-      TMP2--
+    delay_ms(17)
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   

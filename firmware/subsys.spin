@@ -16,7 +16,7 @@ CON
 
   BTTNPin = 16
   SPKRPin = 8
-  RTCADDR = $6000
+  RTCADDR = $7800
 DAT
 TMP     long 0
 TMP2    long 0

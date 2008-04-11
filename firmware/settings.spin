@@ -54,6 +54,7 @@ PUB start | i,addr
     abort FALSE
 
   if not size
+    ' If we don't have any environment variables, try to load the defaults from EEPROM
     addr := SettingsBottom & %11111111_10000000
     eeprom.Initialize(eeprom#BootPin)
     repeat i from 0 to SettingsSize/EEPROMPageSize-1
@@ -110,7 +111,7 @@ PUB getData(key,ptr,size_) | iter
     size_:=0
   unlock
   return size_
-PUB removeData(key) | iter, nextKey
+PUB removeKey(key) | iter, nextKey
   lock
   iter := findKey_(key)
   if iter
@@ -119,7 +120,7 @@ PUB removeData(key) | iter, nextKey
   unlock
   return iter
 PUB setData(key,ptr,size_) | iter
-  removeData(key)
+  removeKey(key)
   lock
   iter := SettingsTop
   if size_>255

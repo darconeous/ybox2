@@ -16,6 +16,7 @@ CON
 OBJ
 
   tel           : "api_telnet_serial"
+  http          : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
@@ -23,7 +24,7 @@ OBJ
   random        : "RealRandom"
                                      
 VAR
-  byte stack[40] 
+  long stack[40] 
   byte stage_two
   
 PUB init | i
@@ -34,7 +35,8 @@ PUB init | i
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
   
-
+  webCog:=0
+  
   subsys.init
   term.start(12)
   term.str(string(13,"ybox2 bootloader",13,"http://www.deepdarc.com/ybox2/",13,13))
@@ -45,10 +47,9 @@ PUB init | i
 
   if settings.findKey(settings#MISC_STAGE_TWO)
     stage_two := TRUE
-    settings.removeData(settings#MISC_STAGE_TWO)
+    settings.removeKey(settings#MISC_STAGE_TWO)
   else
     stage_two := FALSE
-  'stage_two := TRUE
 
   if settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
@@ -63,15 +64,6 @@ PUB init | i
       waitcnt(clkfreq*100000 + cnt)
       reboot
 
-{
-  repeat i from 0 to 127
-    if i
-      term.out(" ")
-    term.hex(byte[$7F80][i],2)
-  term.out(13)  
-  waitcnt(clkfreq*100000 + cnt)
-}
-   
   if settings.getData(settings#NET_MAC_ADDR,@stack,6)
     term.str(string("MAC: "))
     repeat i from 0 to 5
@@ -121,7 +113,15 @@ PUB init | i
   else
     subsys.StatusIdle
  
-  downloadFirmware
+
+  'webCog := cognew(httpInterface, @stack) + 1 
+  'httpInterface
+  repeat
+    \downloadFirmware
+    tel.close
+    subsys.StatusFatalError
+    SadChirp
+    delay_ms(1000)
   
 PRI boot_stage2
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
@@ -129,6 +129,8 @@ PRI boot_stage2
   settings.stop
   term.stop
   tel.stop
+  'if(webCog)
+  '  cogstop(webCog)
   ' Replace this cog with the bootloader
   coginit(cogid,@bootstage2,0)
 PRI initial_configuration | i
@@ -138,13 +140,13 @@ PRI initial_configuration | i
 
   ' Make a random UUID
   repeat i from 0 to 16
-    stack[i] := random.random
+    byte[@stack][i] := random.random
   settings.setData(settings#MISC_UUID,@stack,16)
 
   ' Make a random MAC Address
-  stack[0] := $02
+  byte[@stack][0] := $02
   repeat i from 1 to 5
-    stack[i] := random.random
+    byte[@stack][i] := random.random
   settings.setData(settings#NET_MAC_ADDR,@stack,6)
 
   random.stop
@@ -171,8 +173,24 @@ PRI initial_configuration | i
   
 VAR
   byte buffer [128]
+  byte buffer2 [128]
+  byte webCog
   
-pub downloadFirmware | timeout, retrydelay,in, i, total, addr
+pub httpInterface
+  webCog:=cogid+1
+
+  repeat
+    http.listen(80)
+    http.resetBuffers
+
+    repeat while NOT http.isConnected
+      http.waitConnectTimeout(100)
+  
+    http.str(string("Proshki!",13))
+    delay_ms(500)    
+    http.close
+  
+pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
   term.str(string("Listening on port 72",13))
 
   eeprom.Initialize(eeprom#BootPin)
@@ -205,9 +223,17 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
       buffer[i++] := in
       if i == 128
         ' flush to EEPROM                              
-        if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
-            term.out("E")
-        repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
+        if stage_two
+          'Verify that the bytes we got match the EEPROM
+          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
+            abort
+          repeat i from 0 to 127
+            if buffer[i] <> buffer2[i]
+              abort
+        else
+          if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
+            abort
+          repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
         i:=0
         term.out(".")
@@ -215,16 +241,47 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr
         tel.close
     else
       ifnot tel.isConnected OR total => $8000-settings#SettingsSize
-        if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
-            term.out("E")
-        repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
-        total+=i
+        if stage_two
+          'Verify that the bytes we got match the EEPROM
+          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
+            abort
+          repeat j from 0 to i-1
+            if buffer[j] <> buffer2[j]
+              abort
+
+          total+=i
+          if settings.findKey($1010) AND (total <> settings.getWord($1010))
+            abort                      
+
+          'If we got to this point, then everything matches! Write it out
+          HappyChirp
+
+          ' Kill the network, just to make sure it doesn't interfere
+          tel.close
+          delay_ms(250)
+          tel.stop
+          delay_ms(250)
+
+          repeat i from 0 to total-1 step 128
+            if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
+              abort
+            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, i, @buffer, 128)
+              abort
+            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
+          
+        else
+          if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
+            abort
+          repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
+          total+=i
 
         ' done!
         term.str(string("done.",13))
         term.dec(total)
         term.str(string(" bytes written"))
+        HappyChirp
         subsys.StatusSolid(0,255,0)
+        settings.setWord($1010,total)
         delay_ms(5000)     ' 5 sec delay
         if stage_two
           reboot
@@ -236,52 +293,20 @@ PUB showMessage(str)
   term.str(str)    
   term.str(string($C,$8))    
 
-pub HappyChirp | TMP,TMP2
+pub HappyChirp | i, j
+  repeat j from 0 to 2
+    repeat i from 0 to 30
+      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
+      delay_ms(1)
+    outa[subsys#SPKRPin]:=0  
+    delay_ms(50)
+pub SadChirp | i
 
-  TMP:=25
-  repeat while TMP
-    TMP--
+  repeat i from 0 to 15
     outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=400
-    repeat while TMP2
-      TMP2--
-  TMP:=30
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=350
-    repeat while TMP2
-      TMP2--
-  TMP:=35
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=300
-    repeat while TMP2
-      TMP2--
-pub SadChirp | TMP,TMP2
+    delay_ms(17)
+  outa[subsys#SPKRPin]:=0  
 
-  TMP:=35
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=300
-    repeat while TMP2
-      TMP2--
-  TMP:=30
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=350
-    repeat while TMP2
-      TMP2--
-  TMP:=25
-  repeat while TMP
-    TMP--
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    TMP2:=400
-    repeat while TMP2
-      TMP2--
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
