@@ -36,14 +36,18 @@ PUB init | i
   dira[subsys#SPKRPin]:=1
   
   webCog:=0
+
   
+  settings.start
+
+  'settings.setLong(settings#MISC_LED_CONF,$01090A0B)
+
   subsys.init
   term.start(12)
   term.str(string(13,"ybox2 bootloader",13,"http://www.deepdarc.com/ybox2/",13,13))
 
   subsys.StatusLoading
 
-  settings.start
 
   if settings.findKey(settings#MISC_STAGE_TWO)
     stage_two := TRUE
@@ -109,7 +113,9 @@ PUB init | i
     term.out(13)  
 
   if stage_two
-    subsys.StatusSolid(255,255,255)
+    repeat i from 0 to 255
+      subsys.StatusSolid(i,i,i)
+      delay_ms(5)
   else
     subsys.StatusIdle
  
@@ -167,6 +173,11 @@ PRI initial_configuration | i
   'settings.setByte(settings#SOUND_DISABLE,TRUE)
 
   'settings.setByte(settings#MISC_AUTOBOOT,TRUE)
+
+  ' RGB LED Configuration
+  ' Original board = $000A0B09
+  ' Adafruit board = $01090A0B
+  'settings.setLong(settings#MISC_LED_CONF,$01090A0B)
 
   settings.commit
   return TRUE
@@ -256,11 +267,15 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
           'If we got to this point, then everything matches! Write it out
           HappyChirp
 
+          term.str(string("verified!",13))
+
           ' Kill the network, just to make sure it doesn't interfere
           tel.close
           delay_ms(250)
           tel.stop
           delay_ms(250)
+
+          term.str(string("Writing"))
 
           repeat i from 0 to total-1 step 128
             if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
@@ -268,7 +283,7 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
             if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, i, @buffer, 128)
               abort
             repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
-          
+            term.out(".")
         else
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             abort

@@ -25,9 +25,27 @@ LED_G   byte 0
 LED_B   byte 0
 modecog byte 0
 subsyscog byte 0
+OBJ
+  settings      : "settings"
 VAR
   long stack[16] 'Stack space for new cog
-PUB init
+PUB init | LED_Conf
+  if settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
+    ' We have custom LED settings!
+    ' Update the LED masks
+    LEDRMask:=1<<BYTE[@LED_Conf][0]
+    LEDGMask:=1<<BYTE[@LED_Conf][1]
+    LEDBMask:=1<<BYTE[@LED_Conf][2]
+    if BYTE[@LED_Conf][3]
+      LEDRJmp += %1001_000000000_000000000 ' Invert Red output
+      LEDGJmp += %1001_000000000_000000000 ' Invert Green Output
+      LEDBJmp += %1001_000000000_000000000 ' Invert Blue Output
+  else
+    if LED_CA
+      LEDRJmp += %1001_000000000_000000000 ' Invert Red output
+      LEDGJmp += %1001_000000000_000000000 ' Invert Green Output
+      LEDBJmp += %1001_000000000_000000000 ' Invert Blue Output
+       
   subsyscog := cognew(@run, @LED_R)+1 
   StatusIdle
 
@@ -156,9 +174,9 @@ loop
 LEDDutyLoop
 
               rdbyte T1,LEDRDutyPtr
-              shl T1,#23
+              shl T1,#24
               add LEDRP,T1 wc
-              long %010111_0001_0011_000000000_000000000 + :LEDROff + (LED_CA * %1001_000000000_000000000)
+LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
 '        if_nc jmp #:LEDROff
               or outa,LEDRMask
               jmp #:LEDRDone
@@ -167,9 +185,9 @@ LEDDutyLoop
 :LEDRDone              
 
               rdbyte T1,LEDGDutyPtr
-              shl T1,#23
+              shl T1,#24
               add LEDGP,T1 wc
-              long %010111_0001_0011_000000000_000000000 + :LEDGOff + (LED_CA * %1001_000000000_000000000)
+LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
 '        if_nc jmp #:LEDGOff
               or outa,LEDGMask
               jmp #:LEDGDone
@@ -178,9 +196,9 @@ LEDDutyLoop
 :LEDGDone              
 
               rdbyte T1,LEDBDutyPtr
-              shl T1,#23
+              shl T1,#24
               add LEDBP,T1 wc
-              long %010111_0001_0011_000000000_000000000 + :LEDBOff + (LED_CA * %1001_000000000_000000000)
+LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
 '        if_nc jmp #:LEDBOff
               or outa,LEDBMask
               jmp #:LEDBDone
@@ -214,18 +232,18 @@ RSTFRQ        long  1
 RSTTIME       long  5*80_000_0000
 RSTCLK        long  -1
 RTCPTR        long RTCADDR
-RTCLAST       long 0
+RTCLAST       res  1
 
-T1            long 0
-T2            long 0
+T1            res  1
+T2            res  1
 
-LEDRDutyPtr   long 0
-LEDGDutyPtr   long 0
-LEDBDutyPtr   long 0
+LEDRDutyPtr   res  1
+LEDGDutyPtr   res  1
+LEDBDutyPtr   res  1
 
-LEDRP         long 0     ' Red Phase
-LEDGP         long 0     ' Green Phase
-LEDBP         long 0     ' Blue Phase
+LEDRP         res  1     ' Red Phase
+LEDGP         res  1     ' Green Phase
+LEDBP         res  1     ' Blue Phase
 
               FIT
               

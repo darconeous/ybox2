@@ -31,6 +31,7 @@ CON
   MISC_PASSWORD      = ("P"<<8) + "W"
   MISC_AUTOBOOT      = ("A"<<8) + "B"
   MISC_SOUND_DISABLE = ("s"<<8) + "-"
+  MISC_LED_CONF      = ("L"<<8) + "C" ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
 
   MISC_STAGE_TWO     = ("S"<<8) + "2"
 
@@ -44,7 +45,9 @@ CON
   SERVER_IPv4_ADDR   = ("S"<<8) + "A" 
   SERVER_IPv4_PORT   = ("S"<<8) + "P" 
   SERVER_PATH        = ("S"<<8) + "T" 
-  SERVER_HOST        = ("S"<<8) + "H" 
+  SERVER_HOST        = ("S"<<8) + "H"
+
+  
 DAT
 SettingsLock  byte      -1
 OBJ
