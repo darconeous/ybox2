@@ -64,7 +64,8 @@ PUB start | i,addr
       eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
       addr+=EEPROMPageSize
   return TRUE
-   
+PUB purge
+  bytefill(SettingsBottom,$FF,SettingsSize) 
 PUB stop
   lockret(SettingsLock)
   SettingsLock := -1

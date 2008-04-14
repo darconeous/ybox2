@@ -9,10 +9,10 @@
 CON
   _clkmode = xtal1 + pll16x
   _xinfreq = 5_000_000                                                      
-  LED_CA = 0 ' 1 = Common Anode, 0 = Common Cathode
-  LED_RPin = 9
-  LED_GPin = 11
-  LED_BPin = 10
+  LED_CA = 1 ' 1 = Common Anode, 0 = Common Cathode
+  LED_RPin = 11
+  LED_GPin = 10
+  LED_BPin = 9
 
   BTTNPin = 16
   SPKRPin = 8

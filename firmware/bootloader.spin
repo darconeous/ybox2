@@ -37,11 +37,8 @@ PUB init | i
   
   webCog:=0
 
-  
   settings.start
-
-  'settings.setLong(settings#MISC_LED_CONF,$01090A0B)
-
+  
   subsys.init
   term.start(12)
   term.str(string(13,"ybox2 bootloader",13,"http://www.deepdarc.com/ybox2/",13,13))
