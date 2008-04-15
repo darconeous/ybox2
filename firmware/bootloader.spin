@@ -160,7 +160,7 @@ PRI initial_configuration | i
 
   random.stop
 
-  settings.setString(settings#MISC_PASSWORD,string("password"))  
+  'settings.setString(settings#MISC_PASSWORD,string("password"))  
 
   
   ' Uncomment and change these settings if you don't want to use DHCP
