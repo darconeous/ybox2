@@ -13,7 +13,7 @@ CON
   LED_RPin = 11
   LED_GPin = 10
   LED_BPin = 9
-
+  LED_Brightness = 8 ' 0 = least bright, 8 = most bright
   BTTNPin = 16
   SPKRPin = 8
   RTCADDR = $7800
@@ -174,7 +174,7 @@ loop
 LEDDutyLoop
 
               rdbyte T1,LEDRDutyPtr
-              shl T1,#24
+              shl T1,LEDBright
               add LEDRP,T1 wc
 LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
 '        if_nc jmp #:LEDROff
@@ -185,7 +185,7 @@ LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
 :LEDRDone              
 
               rdbyte T1,LEDGDutyPtr
-              shl T1,#24
+              shl T1,LEDBright
               add LEDGP,T1 wc
 LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
 '        if_nc jmp #:LEDGOff
@@ -196,7 +196,7 @@ LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
 :LEDGDone              
 
               rdbyte T1,LEDBDutyPtr
-              shl T1,#24
+              shl T1,LEDBright
               add LEDBP,T1 wc
 LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
 '        if_nc jmp #:LEDBOff
@@ -220,7 +220,7 @@ LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
               jmp #loop
               
 
-
+LEDBright     long 16+LED_Brightness
 LEDRMask      long (1 << LED_RPin)
 LEDGMask      long (1 << LED_GPin)
 LEDBMask      long (1 << LED_BPin)
