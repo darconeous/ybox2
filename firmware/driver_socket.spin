@@ -589,6 +589,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, established session
     BYTE[handle_addr + sConState] := SESTABLISHED
+    LONG[handle_addr + sAge] := long[RTCADDR]
 
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
       ' ACK response
@@ -651,6 +652,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, established session
     BYTE[handle_addr + sConState] := SESTABLISHED
+    LONG[handle_addr + sAge] := long[RTCADDR]
   
   elseif (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0
     ' Reply to SYN with SYN + ACK
@@ -678,6 +680,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, waiting for establish
     BYTE[handle_addr + sConState] := SSYNSENT
+    LONG[handle_addr + sAge] := long[RTCADDR]
    
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     ' Reply to FIN with ACK
@@ -701,13 +704,15 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, now free
     BYTE[handle_addr + sConState] := SCLOSED
+    LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
     
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' if just an ack, and we sent a syn before, then it's established
     ' this just gives us the ability to send on connect
     BYTE[handle_addr + sConState] := SESTABLISHED
-  
+    LONG[handle_addr + sAge] := long[RTCADDR]
+    
   elseif (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_RST) > 0
     'if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
     '  build_ipheaderskeleton(handle_addr)
@@ -717,6 +722,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' Reset, reset states
     BYTE[handle_addr + sConState] := SCLOSED
+    LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
     
 PRI build_ipheaderskeleton(handle_addr) | hdrlen, hdr_chksum
@@ -868,7 +874,11 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
         'else
         build_tcpskeleton(handle_addr, constant(TCP_ACK | TCP_PSH))
         send_tcpfinal(handle_addr, i)
-        
+    if state == SSYNSENT AND (long[RTCADDR]-LONG[handle_addr + sAge]>5)
+      ' If we haven't gotten back an ACK 5 seconds after sending the SYN, forget about it
+      LONG[handle_addr + sConState] := SCLOSED
+      LONG[handle_addr + sAge] := long[RTCADDR]
+
     if state == SCLOSING
       ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
                                          
@@ -898,6 +908,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       send_tcpfinal(handle_addr, 0)
 
       BYTE[handle_addr + sConState] := SSYNSENT
+      LONG[handle_addr + sAge] := long[RTCADDR]
       
 
   'sFlags &= !SEND_WAITING
@@ -909,9 +920,11 @@ PRI arp_request_checkgateway(handle_addr) | ip_ptr
   if (BYTE[ip_ptr] & ip_subnet[0]) == (ip_addr[0] & ip_subnet[0]) AND (BYTE[ip_ptr + 1] & ip_subnet[1]) == (ip_addr[1] & ip_subnet[1]) AND (BYTE[ip_ptr + 2] & ip_subnet[2]) == (ip_addr[2] & ip_subnet[2]) AND (BYTE[ip_ptr + 3] & ip_subnet[3]) == (ip_addr[3] & ip_subnet[3])   
     arp_request(BYTE[ip_ptr], BYTE[ip_ptr + 1], BYTE[ip_ptr + 2], BYTE[ip_ptr + 3])
     BYTE[handle_addr + sConState] := SCONNECTINGARP2
+    LONG[handle_addr + sAge] := long[RTCADDR]
   else
     arp_request(ip_gateway[0], ip_gateway[1], ip_gateway[2], ip_gateway[3])
     BYTE[handle_addr + sConState] := SCONNECTINGARP2G   
+    LONG[handle_addr + sAge] := long[RTCADDR]
   
   
 ' *******************************
@@ -969,6 +982,7 @@ PUB listen(port) | handle_addr
 
   ' it's now listening
   BYTE[handle_addr + sConState] := SLISTEN
+  LONG[handle_addr + sAge] := long[RTCADDR]
 
   return BYTE[handle_addr + sSockIndex] 
 
@@ -990,6 +1004,7 @@ PUB connect(ip, remoteport, localport) | handle_addr
   WORD[handle_addr + sDstPort] := conv_endianword(localport)
 
   BYTE[handle_addr + sConState] := SCONNECTINGARP1
+  LONG[handle_addr + sAge] := long[RTCADDR]
   
   return BYTE[handle_addr + sSockIndex]
 
@@ -998,11 +1013,13 @@ PUB close(handle) | handle_addr
   handle_addr := @sSockets + (sSocketBytes * handle)
   if isConnected(handle)
     BYTE[handle_addr + sConState] := SCLOSING
+    LONG[handle_addr + sAge] := long[RTCADDR]
   else
     BYTE[handle_addr + sConState] := SCLOSED
+    LONG[handle_addr + sAge] := long[RTCADDR]
     resetBuffers(handle)
 
-PUB closeall(handle) | handle_addr
+PUB closeall | handle
   repeat handle from 0 to constant(sNumSockets - 1)
     close(handle)
     
@@ -1087,21 +1104,22 @@ CON
 '         1 byte  - (1 byte ) handle index
 ' total: 24 bytes
 
-  sSocketBytes  = 28      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
+  sSocketBytes  = 32      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
   
   sNumSockets = 2         ' number of sockets
 
 ' Offsets for socket status arrays
   sMySeqNum = 0
   sMyAckNum = 4
-  sSrcIp = 8 
-  sSrcPort = 12
-  sDstPort = 14
-  sNxtAck = 18
-  sConState = 20
-  sSrcMac = 21
+  sSrcIp = 8
+  sAge = 12 
+  sSrcPort = 16
+  sDstPort = 18
+  sNxtAck = 20
+  sConState = 24
+  sSrcMac = 25
 
-  sSockIndex = 27
+  sSockIndex = 31
 
 ' Socket states (user should never touch these)
   SCLOSED = 0                   ' closed, handle not used
@@ -1116,8 +1134,8 @@ CON
 
 DAT
               long      0       ' long align the socket state data
-sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
-              byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
+sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
+              byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
 
 
 CON

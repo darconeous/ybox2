@@ -17,33 +17,45 @@ PUB stop
 PUB connect(ip, remoteport, localport)
 
   listening := false
+  close
   return (handle := tcp.connect(ip, remoteport, localport))
 
 PUB listen(port)
 
   listenport := port
   listening := true
+  close
   return (handle := tcp.listen(listenport))
 
 PUB isConnected
 
-  return tcp.isConnected(handle)
+  if handle=>0
+    return tcp.isConnected(handle)
+  return FALSE
 PUB isEOF
 
   return tcp.isEOF(handle)
 
 PUB resetBuffers
 
-  tcp.resetBuffers(handle)
+  if handle=>0
+    tcp.resetBuffers(handle)
 
 PUB waitConnectTimeout(ms) | t
 
   t := cnt
   repeat until isConnected or (((cnt - t) / (clkfreq / 1000)) > ms)
+    if listening
+      ifnot tcp.isValidHandle(handle)
+        listen(listenport)
 
 PUB close
 
-  tcp.close(handle)
+  if handle=>0
+    tcp.close(handle)
+PUB closeAll
+
+  tcp.closeAll
 
 PUB rxflush
 
@@ -58,9 +70,10 @@ PUB rxcheck
   return tcp.readByteNonBlocking(handle)
 
 PUB rxtime(ms) : rxbyte | t
-
+  rxbyte:=-1
   t := cnt
-  repeat until (rxbyte := rxcheck) => 0 or (cnt - t) / (clkfreq / 1000) > ms
+  if handle=>0
+    repeat until (rxbyte := rxcheck) => 0 or (cnt - t) / (clkfreq / 1000) > ms
 
 PUB rx : rxbyte
 
@@ -73,7 +86,7 @@ PUB txcheck(txbyte)
       listen(listenport)
 
   return tcp.writeByteNonBlocking(handle, txbyte)
-
+  
 PUB tx(txbyte)
 
   repeat while isConnected and (txcheck(txbyte) < 0)

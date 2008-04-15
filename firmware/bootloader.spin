@@ -212,9 +212,17 @@ pub httpInterface | char, i, lineLength,contentSize
   webCog:=cogid+1
 
   repeat
-    http.listen(80)
     http.resetBuffers
-
+    http.close
+    repeat while \http.listen(80) == -1
+      term.str(string("No free sockets",13))
+      if ina[subsys#BTTNPin]
+        boot_stage2
+      delay_ms(2000)
+      http.closeall
+      next
+    http.resetBuffers
+    contentSize:=0
     repeat while NOT http.isConnected
       http.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
