@@ -121,14 +121,14 @@ PUB init | i
     subsys.StatusIdle
  
 
-  webCog := cognew(httpInterface, @stack) + 1 
-  'httpInterface
-  repeat
-    \downloadFirmware
-    tel.close
-    subsys.StatusFatalError
-    SadChirp
-    delay_ms(1000)
+  'webCog := cognew(httpInterface, @stack) + 1 
+  httpInterface
+  'repeat
+  '  \downloadFirmware
+  '  tel.close
+  '  subsys.StatusFatalError
+  '  SadChirp
+  '  delay_ms(1000)
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
@@ -191,7 +191,8 @@ VAR
   byte webCog
   byte httpQuery[8]
   byte httpPath[64]
-pub httpInterface | char, i, lineLength
+  byte httpHeader[32]
+pub httpInterface | char, i, lineLength,contentSize
   webCog:=cogid+1
 
   repeat
@@ -200,6 +201,8 @@ pub httpInterface | char, i, lineLength
 
     repeat while NOT http.isConnected
       http.waitConnectTimeout(100)
+      if ina[subsys#BTTNPin]
+        boot_stage2
     i:=0
 
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
@@ -230,8 +233,19 @@ pub httpInterface | char, i, lineLength
         lineLength:=0
       else
         if (char <> 10)
+          if lineLength<31
+            httpHeader[lineLength]:=char
+            if char == ":"
+              httpHeader[lineLength]:=0
+              if strcomp(@httpHeader,string("Content-Length"))
+                'content size!
+                term.str(string("contentSize:"))
+                contentSize := http.readDec
+                term.dec(contentSize)
+                term.out(13)
+                lineLength:=1
           lineLength++
-
+             
     if strcomp(@httpQuery,string("GET"))
       if strcomp(@httpPath,string("/"))
         http.str(string("HTTP/1.1 200 OK",13,10))
@@ -266,7 +280,7 @@ pub httpInterface | char, i, lineLength
         http.close
         delay_ms(1000)
         boot_stage2
-      elseif strcomp(@httpPath,string("/ramdump.bin"))
+      elseif strcomp(@httpPath,string("/ramimage.bin"))
         http.str(string("HTTP/1.1 200 OK",13,10))
         http.str(string("Connection: close",13,10))
         http.str(string(13,10))
@@ -278,32 +292,45 @@ pub httpInterface | char, i, lineLength
         http.str(string("Connection: close",13,10))
         http.str(string(13,10))
         http.str(string("<h1>404: Not Found</h1>",13,10))
+    elseif strcomp(@httpQuery,string("PUT"))
+      if strcomp(@httpPath,string("/stage2.bin"))
+        http.rxtime(1000)
+        if (i:=\downloadFirmwareHTTP(contentSize))
+          SadChirp
+          http.str(string("HTTP/1.1 400 Bad Request",13,10))
+          http.str(string("Connection: close",13,10))
+          http.str(string(13,10))
+          http.str(string("<h1>Upload failed.</h1>",13,10))
+          http.dec(i)         
+        else
+          http.str(string("HTTP/1.1 303 OK",13,10))
+          http.str(string("Location: /",13,10))
+          http.str(string("Connection: close",13,10))
+          http.str(string(13,10))
+          http.str(string("<h1>Upload complete.</h1>",13,10))
+      else
+        http.str(string("HTTP/1.1 404 Not Found",13,10))
+        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        http.str(string("<h1>404: Not Found</h1>",13,10))
+    else
+      http.str(string("HTTP/1.1 501 Not Implemented",13,10))
+      http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+      http.str(string("Connection: close",13,10))
+      http.str(string(13,10))
+      http.str(string("<h1>501: Not Implemented</h1>",13,10))
+    
     'delay_ms(1500)    
     http.close
     term.str(string("HTTP Closed",13))
     delay_ms(500)    
     http.close
     http.resetBuffers
-  
-pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
-  term.str(string("Listening on port 72",13))
 
+
+pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
   eeprom.Initialize(eeprom#BootPin)
-
-  
-  tel.listen(72)
-  tel.resetBuffers
-  
-  repeat while NOT tel.isConnected
-    tel.waitConnectTimeout(100)
-    if ina[subsys#BTTNPin]
-      boot_stage2
-
-  subsys.StatusLoading
-    
-  term.str(string("Connected",13))
-
-  'tel.str(string("ybox2",13))
 
   i:=0
   total:=0
@@ -312,9 +339,12 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
     addr:=$0000 ' Stage two writes to the lower 32KB
   else
     addr:=$8000 ' Stage one writes to the upper 32KB
-  
+
+  if contentSize > $8000-settings#SettingsSize
+    contentSize:=$8000-settings#SettingsSize
+   
   repeat
-    if (in := tel.rxcheck) => 0
+    if (in := http.rxcheck) => 0
       subsys.StatusSolid(0,128,0)
       buffer[i++] := in
       if i == 128
@@ -323,36 +353,36 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
         if stage_two
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
-            abort
+            abort -1
           repeat i from 0 to 127
             if buffer[i] <> buffer2[i]
-              abort
+              abort -2
         else
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
-            abort
+            abort -3
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
         i:=0
         term.out(".")
       if total => $8000-settings#SettingsSize
-        tel.close
+        http.close
     else
       subsys.StatusSolid(128,0,0)
-      if tel.isEOF OR total => $8000-settings#SettingsSize
+      if http.isEOF OR (total+i) => contentSize
         if stage_two
           ' Do we have the correct number of bytes?
           if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))
             SadChirp
             term.dec((total+i) - settings.getWord($1010))
             term.str(string(" byte diff!",13))
-            abort                      
+            abort -4                     
 
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
-            abort
+            abort -1
           repeat j from 0 to i-1
             if buffer[j] <> buffer2[j]
-              abort
+              abort -5
 
           total+=i
 
@@ -362,40 +392,34 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
           
           term.str(string("verified!",13))
 
-          ' Kill the network, just to make sure it doesn't interfere
-          tel.close
-          delay_ms(250)
-          tel.stop
-          delay_ms(250)
-
           term.str(string("Writing"))
 
           repeat i from 0 to total-1 step 128
             if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
-              abort
+              abort -6
             if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, i, @buffer, 128)
-              abort
+              abort -7
             repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
             term.out(".")
         else
-          tel.close
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
-            abort
+            abort -8
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
           total+=i
         
         ' done!
         term.str(string("done.",13))
         term.dec(total)
-        term.str(string(" bytes written"))
+        term.str(string(" bytes written",13))
         HappyChirp
         subsys.StatusSolid(0,255,0)
         settings.setWord($1010,total)
-        delay_ms(5000)     ' 5 sec delay
-        if stage_two
-          reboot
-        else
-          boot_stage2
+        return 0
+        'delay_ms(5000)     ' 5 sec delay
+
+
+
+  return 0
 
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    

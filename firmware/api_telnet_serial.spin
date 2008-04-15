@@ -102,7 +102,19 @@ PUB dec(value) | i
       tx("0")
     i /= 10
 
+PUB readDec | i,char, retVal
 
+  retVal:=0
+  repeat 8
+    case (char := rx)
+      "0".."9":
+        retVal:=retVal*10+char-"0"
+      " ":
+        if retVal<>0
+          return retVal
+      OTHER:
+        return retVal
+  return retVal 
 PUB hex(value, digits)
 
 '' Print a hexadecimal number
