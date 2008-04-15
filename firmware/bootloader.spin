@@ -30,7 +30,10 @@ OBJ
 VAR
   long stack[80] 
   byte stage_two
-  
+DAT
+productName   BYTE      "ybox2 bootloader v0.5",0      
+productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
+
 PUB init | i
   'cognew(@bootstage2,0)
   'return
@@ -45,8 +48,13 @@ PUB init | i
   
   subsys.init
   term.start(12)
-  term.str(string(13,"ybox2 bootloader",13,"http://www.deepdarc.com/ybox2/",13,13))
-
+  term.out(13)
+  term.str(@productName)
+  term.out(13)
+  term.str(@productURL)
+  term.out(13)
+  term.out(13)
+  
   subsys.StatusLoading
 
 
@@ -192,6 +200,14 @@ VAR
   byte httpQuery[8]
   byte httpPath[64]
   byte httpHeader[32]
+
+DAT
+HTTP_200      BYTE      "HTTP/1.1 200 OK"
+CR_LF         BYTE      13,10,0
+HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
+HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
+HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
+
 pub httpInterface | char, i, lineLength,contentSize
   webCog:=cogid+1
 
@@ -248,49 +264,54 @@ pub httpInterface | char, i, lineLength,contentSize
              
     if strcomp(@httpQuery,string("GET"))
       if strcomp(@httpPath,string("/"))
-        http.str(string("HTTP/1.1 200 OK",13,10))
-        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
-        http.str(string("<h1>ybox2</h1><p><a href='/reboot'>Reboot</a></p><p><a href='/stage2'>Stage 2</a></p>"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("<h1>"))
+        http.str(@productName)
+        http.str(string("</h1><p><a href='/reboot'>Reboot</a> | <a href='/stage2'>Stage 2</a></p>"))
         if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
           http.str(string("<p>MAC: "))
           repeat i from 0 to 5
             if i
               http.tx("-")
             http.hex(byte[@httpQuery][i],2)
-          http.str(string("</p>",13,10))  
+          http.str(string("</p>"))  
+        http.str(string("<p><a href='"))
+        http.str(@productURL)
+        http.str(string("'>More info</a></p>"))
       elseif strcomp(@httpPath,string("/reboot"))
-        http.str(string("HTTP/1.1 200 OK",13,10))
-        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
         http.str(string("<h1>Rebooting</h1>",13,10))
         delay_ms(1000)
         http.close
         delay_ms(1000)
         reboot
       elseif strcomp(@httpPath,string("/stage2"))
-        http.str(string("HTTP/1.1 200 OK",13,10))
-        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
         http.str(string("<h1>Booting to stage 2</h1>",13,10))
         delay_ms(1000)
         http.close
         delay_ms(1000)
         boot_stage2
       elseif strcomp(@httpPath,string("/ramimage.bin"))
-        http.str(string("HTTP/1.1 200 OK",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
         repeat i from 0 to $7FFF
           http.tx(BYTE[i])
       else           
-        http.str(string("HTTP/1.1 404 NOTFOUND",13,10))
-        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
+        http.str(@HTTP_404)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
         http.str(string("<h1>404: Not Found</h1>",13,10))
     elseif strcomp(@httpQuery,string("PUT"))
       if strcomp(@httpPath,string("/stage2.bin"))
@@ -298,32 +319,34 @@ pub httpInterface | char, i, lineLength,contentSize
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
-          http.str(string("Connection: close",13,10))
-          http.str(string(13,10))
+          http.str(@HTTP_CONTENT_TYPE_HTML)
+          http.str(@HTTP_CONNECTION_CLOSE)
+          http.str(@CR_LF)
           http.str(string("<h1>Upload failed.</h1>",13,10))
           http.dec(i)         
         else
           http.str(string("HTTP/1.1 303 OK",13,10))
           http.str(string("Location: /",13,10))
-          http.str(string("Connection: close",13,10))
-          http.str(string(13,10))
+          http.str(@HTTP_CONTENT_TYPE_HTML)
+          http.str(@HTTP_CONNECTION_CLOSE)
+          http.str(@CR_LF)
           http.str(string("<h1>Upload complete.</h1>",13,10))
       else
-        http.str(string("HTTP/1.1 404 Not Found",13,10))
-        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-        http.str(string("Connection: close",13,10))
-        http.str(string(13,10))
+        http.str(@HTTP_404)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
         http.str(string("<h1>404: Not Found</h1>",13,10))
     else
       http.str(string("HTTP/1.1 501 Not Implemented",13,10))
-      http.str(string("Content-Type: text/html; charset=utf-8",13,10))
-      http.str(string("Connection: close",13,10))
-      http.str(string(13,10))
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
       http.str(string("<h1>501: Not Implemented</h1>",13,10))
     
     'delay_ms(1500)    
     http.close
-    term.str(string("HTTP Closed",13))
+    term.str(string(13,"HTTP Closed",13))
     delay_ms(500)    
     http.close
     http.resetBuffers

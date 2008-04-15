@@ -709,11 +709,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     BYTE[handle_addr + sConState] := SESTABLISHED
   
   elseif (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_RST) > 0
-    if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_ACK)
-      send_tcpfinal(handle_addr, 0)
-      abort  ' Bad sequence Num!
+    'if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+    '  build_ipheaderskeleton(handle_addr)
+    '  build_tcpskeleton(handle_addr, TCP_ACK)
+    '  send_tcpfinal(handle_addr, 0)
+    '  abort  ' Bad sequence Num!
 
     ' Reset, reset states
     BYTE[handle_addr + sConState] := SCLOSED
@@ -875,7 +875,8 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       'LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
        
       build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_RST)
+      'build_tcpskeleton(handle_addr, TCP_RST)
+      build_tcpskeleton(handle_addr, TCP_FIN|TCP_ACK)
       send_tcpfinal(handle_addr, 0)
 
       ' set socket state, now free
