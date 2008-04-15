@@ -153,8 +153,8 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
         if dhcp_delay < 5000*32
           dhcp_delay *= 2 ' Double the delay time. Exponential back-off.
           dhcp_delay += 255-(randseed? >> 23) ' Add some randomness
-    elseif i > 10
-      ' perform send tick (occurs every 10 cycles, since incoming packets more important)
+    elseif i > 5
+      ' perform send tick (occurs every 5 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
       nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
@@ -566,7 +566,10 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
       settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
       settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
       settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
-      
+  else
+    if dstport == 69
+      ' TFTP!
+          
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
   ' Handles incoming TCP packets
@@ -589,23 +592,19 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
       ' ACK response
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_ACK)
-      send_tcpfinal(handle_addr, 0)
+      if LONG[handle_addr + sNxtAck] < 0
+        build_ipheaderskeleton(handle_addr)
+        build_tcpskeleton(handle_addr, TCP_ACK)
+        send_tcpfinal(handle_addr, 0)
       abort  ' Bad sequence Num!
 
     if datain_len > buffer_length
       ' ACK response
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_ACK)
-      send_tcpfinal(handle_addr, 0)
+      if LONG[handle_addr + sNxtAck] < 0
+        build_ipheaderskeleton(handle_addr)
+        build_tcpskeleton(handle_addr, TCP_ACK)
+        send_tcpfinal(handle_addr, 0)
       abort
-    {
-    if (WORD[@rx_head] > WORD[@rx_tail] ) AND (datain_len > (buffer_length-(WORD[@rx_head]-WORD[@rx_tail])))
-      abort
-    if (WORD[@rx_head] < WORD[@rx_tail] ) AND (datain_len > (buffer_length-(WORD[@rx_tail]-WORD[@rx_head])))
-      abort
-    }  
 
     head_work := WORD[@rx_head][handle]
 
@@ -617,20 +616,24 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
         head_work := (head_work + 1) & buffer_mask
       else
         ' ACK response
-        build_ipheaderskeleton(handle_addr)
-        build_tcpskeleton(handle_addr, TCP_ACK)
-        send_tcpfinal(handle_addr, 0)
+        if LONG[handle_addr + sNxtAck] < 0
+          build_ipheaderskeleton(handle_addr)
+          build_tcpskeleton(handle_addr, TCP_ACK)
+          send_tcpfinal(handle_addr, 0)
         abort  ' out of space!
 
     WORD[@rx_head][handle]:=head_work
-     
+
+    if LONG[handle_addr + sNxtAck] < 0
+      LONG[handle_addr + sNxtAck]:=datain_len 
+ 
     ' recalculate ack Num
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
 
     ' ACK response
-    build_ipheaderskeleton(handle_addr)
-    build_tcpskeleton(handle_addr, TCP_ACK)
-    send_tcpfinal(handle_addr, 0)
+    'build_ipheaderskeleton(handle_addr)
+    'build_tcpskeleton(handle_addr, TCP_ACK)
+    'send_tcpfinal(handle_addr, 0)
 
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' We got a server response, so we ACK it
@@ -679,6 +682,13 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     ' Reply to FIN with ACK
 
+    ' We only want to ACK a FIN if we have received everything up to this point.
+    if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_ACK)
+      send_tcpfinal(handle_addr, 0)
+      abort  ' Bad sequence Num!
+
     ' get updated sequence and ack numbers (gaurantee we have correct ones to kill connection with)
     bytemove(handle_addr + sMySeqNum, pkt + TCP_acknum, 4)
     bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
@@ -691,6 +701,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' set socket state, now free
     BYTE[handle_addr + sConState] := SCLOSED
+    'resetBuffers(handle)
     
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' if just an ack, and we sent a syn before, then it's established
@@ -698,9 +709,16 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     BYTE[handle_addr + sConState] := SESTABLISHED
   
   elseif (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_RST) > 0
+    if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_ACK)
+      send_tcpfinal(handle_addr, 0)
+      abort  ' Bad sequence Num!
+
     ' Reset, reset states
     BYTE[handle_addr + sConState] := SCLOSED
-
+    'resetBuffers(handle)
+    
 PRI build_ipheaderskeleton(handle_addr) | hdrlen, hdr_chksum
   
   bytemove(pkt + ip_destaddr, handle_addr + sSrcIp, 4)                          ' Set destination address
@@ -816,7 +834,7 @@ PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
 ' ******************************
 ' ** Transmit Buffer Handlers **
 ' ******************************
-PRI tick_tcpsend | i, ptr, handle, handle_addr
+PRI tick_tcpsend | state,i, ptr, handle, handle_addr
   ' Check buffers for data to send (called in main loop)
   
   'if sFlags & SEND_WAITING == 0
@@ -824,29 +842,37 @@ PRI tick_tcpsend | i, ptr, handle, handle_addr
 
   repeat handle from 0 to constant(sNumSockets - 1)
     handle_addr := @sSockets + (sSocketBytes * handle)
-    i := BYTE[handle_addr + sConState]
-    if i == SESTABLISHED
+    state := BYTE[handle_addr + sConState]
+
+
+    if state == SESTABLISHED OR state == SCLOSING
       ' Check to see if we have data to send, if we do, send it
-      
+      ' If we have hit out next ack marker, send an ACK
+      if LONG[handle_addr + sNxtAck] == 0
+        LONG[handle_addr + sNxtAck]--  
+        build_ipheaderskeleton(handle_addr)
+        build_tcpskeleton(handle_addr, TCP_ACK)
+        send_tcpfinal(handle_addr, 0)
+        
       i := 0
-      repeat
-        if WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
+      repeat while WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
           ptr := @tx_buffer + (handle * buffer_length)
           BYTE[pkt][TCP_data + i] := byte[ptr][WORD[@tx_tail][handle]]
           WORD[@tx_tail][handle] := (WORD[@tx_tail][handle] + 1) & buffer_mask
           ++i
-        else
-          quit  ' no data left
 
       if i > 0 
         build_ipheaderskeleton(handle_addr)
+        'if state == SCLOSING
+        '  build_tcpskeleton(handle_addr, constant(TCP_ACK | TCP_PSH | TCP_FIN))
+        'else
         build_tcpskeleton(handle_addr, constant(TCP_ACK | TCP_PSH))
         send_tcpfinal(handle_addr, i)
         
-    elseif i == SCLOSING
+    if state == SCLOSING
       ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
                                          
-      LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+      'LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
        
       build_ipheaderskeleton(handle_addr)
       build_tcpskeleton(handle_addr, TCP_RST)
@@ -855,12 +881,12 @@ PRI tick_tcpsend | i, ptr, handle, handle_addr
       ' set socket state, now free
       BYTE[handle_addr + sConState] := SCLOSED
 
-    elseif i == SCONNECTINGARP1
+    elseif state == SCONNECTINGARP1
       ' We need to send an arp request
 
       arp_request_checkgateway(handle_addr)
 
-    elseif i == SCONNECTING
+    elseif state == SCONNECTING
       ' Yea! We got an arp response previously, so now we can send the SYN
 
       LONG[handle_addr + sMySeqNum] := conv_endianlong(++pkt_isn)        
@@ -936,6 +962,7 @@ PUB listen(port) | handle_addr
   if handle_addr < 0
     return -1               
 
+  LONG[handle_addr + sNxtAck]:=-1 
   WORD[handle_addr + sSrcPort] := 0                     ' no source port yet
   WORD[handle_addr + sDstPort] := conv_endianword(port) ' we do have a dest port though
 
@@ -956,6 +983,7 @@ PUB connect(ip, remoteport, localport) | handle_addr
     return -1
 
   ' copy in ip, port data (with respect to the remote host, since we use same code as server)
+  LONG[handle_addr + sNxtAck] := -1 
   LONG[handle_addr + sSrcIp] := LONG[ip]
   WORD[handle_addr + sSrcPort] := conv_endianword(remoteport)
   WORD[handle_addr + sDstPort] := conv_endianword(localport)
@@ -971,6 +999,7 @@ PUB close(handle) | handle_addr
     BYTE[handle_addr + sConState] := SCLOSING
   else
     BYTE[handle_addr + sConState] := SCLOSED
+    resetBuffers(handle)
 
 PUB closeall(handle) | handle_addr
   repeat handle from 0 to constant(sNumSockets - 1)
@@ -982,8 +1011,12 @@ PUB isConnected(handle) | handle_addr
   handle_addr := @sSockets + (sSocketBytes * handle)
   if BYTE[handle_addr + sConState] == SESTABLISHED
     return true
-  else
+  return false
+PUB isEOF(handle) | handle_addr
+  handle_addr := @sSockets + (sSocketBytes * handle)
+  if BYTE[handle_addr + sConState] == SESTABLISHED
     return false
+  return WORD[@rx_tail][handle] == WORD[@rx_head][handle]
 
 PUB isValidHandle(handle) | handle_addr
 '' Checks to see if the handle is valid, handles will become invalid once they are used
@@ -992,7 +1025,7 @@ PUB isValidHandle(handle) | handle_addr
   handle_addr := @sSockets + (sSocketBytes * handle)
 
   return BYTE[handle_addr + sConState] <> SCLOSED
-
+  
 PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will not block (returns -1 if no byte avail)
@@ -1002,6 +1035,11 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
     ptr := @rx_buffer + (handle * buffer_length)
     rxbyte := byte[ptr][WORD[@rx_tail][handle]]
     WORD[@rx_tail][handle] := (WORD[@rx_tail][handle] + 1) & buffer_mask
+
+    ptr := @sSockets + (sSocketBytes * handle)
+    if LONG[ptr + sNxtAck] > 0
+      LONG[ptr + sNxtAck]--  
+    
     
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
@@ -1048,7 +1086,7 @@ CON
 '         1 byte  - (1 byte ) handle index
 ' total: 24 bytes
 
-  sSocketBytes  = 24      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
+  sSocketBytes  = 28      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
   
   sNumSockets = 2         ' number of sockets
 
@@ -1058,9 +1096,11 @@ CON
   sSrcIp = 8 
   sSrcPort = 12
   sDstPort = 14
-  sConState = 16
-  sSrcMac = 17
-  sSockIndex = 23
+  sNxtAck = 18
+  sConState = 20
+  sSrcMac = 21
+
+  sSockIndex = 27
 
 ' Socket states (user should never touch these)
   SCLOSED = 0                   ' closed, handle not used
@@ -1075,13 +1115,13 @@ CON
 
 DAT
               long      0       ' long align the socket state data
-sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
-              byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
+sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
+              byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
 
 
 CON
 ' Circular Buffer constants
-  buffer_length = 2048 '128
+  buffer_length = 1024 '128
   buffer_mask   = buffer_length - 1
 
 DAT

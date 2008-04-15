@@ -17,7 +17,6 @@ OBJ
 
   tel           : "api_telnet_serial"
   term          : "TV_Text"
-  timer         : "timer"
   ir            : "ir_reader_sony"
   subsys        : "subsys"
   settings      : "settings"
@@ -123,7 +122,6 @@ PRI initial_configuration
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/?id=124932&pass=sunplant"))
 
-  settings.commit
   return TRUE
   
 PUB main | ircode
@@ -201,7 +199,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in
     settings.getString(settings#SERVER_PATH,@path_holder,64)
     tel.waitConnectTimeout(2000)
      
-    if tel.isConnected
+    if NOT tel.isEOF
 
       term.str(string($1,$B,12,"                                       "))
       term.str(string($1,$A,39,$C,$8," ",$1))

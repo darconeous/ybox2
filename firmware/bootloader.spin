@@ -2,11 +2,15 @@
         ybox2 - bootloader object
         http://www.deepdarc.com/ybox2
 
+        Designed for use with a 64KB EEPROM. It will not work
+        properly with a 32KB EEPROM.
+
         See the method 'initial_configuration' to change settings
         like the MAC address, IP address, server address, etc.
 
         If your pin assignments are different, you'll need to
         change them here and in the subsys object.
+
 }}
 CON
 
@@ -24,7 +28,7 @@ OBJ
   random        : "RealRandom"
                                      
 VAR
-  long stack[40] 
+  long stack[80] 
   byte stage_two
   
 PUB init | i
@@ -117,7 +121,7 @@ PUB init | i
     subsys.StatusIdle
  
 
-  'webCog := cognew(httpInterface, @stack) + 1 
+  webCog := cognew(httpInterface, @stack) + 1 
   'httpInterface
   repeat
     \downloadFirmware
@@ -126,16 +130,18 @@ PUB init | i
     SadChirp
     delay_ms(1000)
   
-PRI boot_stage2
+PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
-  subsys.stop
-  settings.stop
-  term.stop
-  tel.stop
-  'if(webCog)
-  '  cogstop(webCog)
+  repeat i from 0 to 7
+    if cogid<>i
+      cogstop(i)
+  'subsys.stop
+  'settings.stop
+  'term.stop
+  'tel.stop
   ' Replace this cog with the bootloader
-  coginit(cogid,@bootstage2,0)
+  coginit(0,@bootstage2,0)
+  cogstop(cogid)
 PRI initial_configuration | i
   term.str(string("First boot!",13))
 
@@ -183,8 +189,9 @@ VAR
   byte buffer [128]
   byte buffer2 [128]
   byte webCog
-  
-pub httpInterface
+  byte httpQuery[8]
+  byte httpPath[64]
+pub httpInterface | char, i, lineLength
   webCog:=cogid+1
 
   repeat
@@ -193,10 +200,90 @@ pub httpInterface
 
     repeat while NOT http.isConnected
       http.waitConnectTimeout(100)
-  
-    http.str(string("Proshki!",13))
+    i:=0
+
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
+      httpQuery[i]:=char
+      if httpQuery[i] == " "
+        quit
+      i++
+    httpQuery[i]:=0
+    term.str(string("HTTP "))
+    term.str(@httpQuery)
+    term.out(" ")
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      httpPath[i]:=char
+      if httpPath[i] == " "
+        quit
+      i++
+    httpPath[i]:=0
+
+    term.str(@httpPath)
+    term.out(13)
+
+    lineLength:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
+      if (char == 13)
+        ifnot lineLength
+          quit
+        lineLength:=0
+      else
+        if (char <> 10)
+          lineLength++
+
+    if strcomp(@httpQuery,string("GET"))
+      if strcomp(@httpPath,string("/"))
+        http.str(string("HTTP/1.1 200 OK",13,10))
+        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        http.str(string("<h1>ybox2</h1><p><a href='/reboot'>Reboot</a></p><p><a href='/stage2'>Stage 2</a></p>"))
+        if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
+          http.str(string("<p>MAC: "))
+          repeat i from 0 to 5
+            if i
+              http.tx("-")
+            http.hex(byte[@httpQuery][i],2)
+          http.str(string("</p>",13,10))  
+      elseif strcomp(@httpPath,string("/reboot"))
+        http.str(string("HTTP/1.1 200 OK",13,10))
+        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        http.str(string("<h1>Rebooting</h1>",13,10))
+        delay_ms(1000)
+        http.close
+        delay_ms(1000)
+        reboot
+      elseif strcomp(@httpPath,string("/stage2"))
+        http.str(string("HTTP/1.1 200 OK",13,10))
+        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        http.str(string("<h1>Booting to stage 2</h1>",13,10))
+        delay_ms(1000)
+        http.close
+        delay_ms(1000)
+        boot_stage2
+      elseif strcomp(@httpPath,string("/ramdump.bin"))
+        http.str(string("HTTP/1.1 200 OK",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        repeat i from 0 to $7FFF
+          http.tx(BYTE[i])
+      else           
+        http.str(string("HTTP/1.1 404 NOTFOUND",13,10))
+        http.str(string("Content-Type: text/html; charset=utf-8",13,10))
+        http.str(string("Connection: close",13,10))
+        http.str(string(13,10))
+        http.str(string("<h1>404: Not Found</h1>",13,10))
+    'delay_ms(1500)    
+    http.close
+    term.str(string("HTTP Closed",13))
     delay_ms(500)    
     http.close
+    http.resetBuffers
   
 pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
   term.str(string("Listening on port 72",13))
@@ -216,7 +303,7 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
     
   term.str(string("Connected",13))
 
-  tel.str(string("ybox2",13))
+  'tel.str(string("ybox2",13))
 
   i:=0
   total:=0
@@ -228,9 +315,11 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
   
   repeat
     if (in := tel.rxcheck) => 0
+      subsys.StatusSolid(0,128,0)
       buffer[i++] := in
       if i == 128
         ' flush to EEPROM                              
+        subsys.StatusSolid(0,0,128)
         if stage_two
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
@@ -248,8 +337,16 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
       if total => $8000-settings#SettingsSize
         tel.close
     else
-      ifnot tel.isConnected OR total => $8000-settings#SettingsSize
+      subsys.StatusSolid(128,0,0)
+      if tel.isEOF OR total => $8000-settings#SettingsSize
         if stage_two
+          ' Do we have the correct number of bytes?
+          if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))
+            SadChirp
+            term.dec((total+i) - settings.getWord($1010))
+            term.str(string(" byte diff!",13))
+            abort                      
+
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
             abort
@@ -258,12 +355,11 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
               abort
 
           total+=i
-          if settings.findKey($1010) AND (total <> settings.getWord($1010))
-            abort                      
 
           'If we got to this point, then everything matches! Write it out
+          subsys.StatusLoading
           HappyChirp
-
+          
           term.str(string("verified!",13))
 
           ' Kill the network, just to make sure it doesn't interfere
@@ -282,11 +378,12 @@ pub downloadFirmware | timeout, retrydelay,in, i, total, addr,j
             repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
             term.out(".")
         else
+          tel.close
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             abort
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
           total+=i
-
+        
         ' done!
         term.str(string("done.",13))
         term.dec(total)

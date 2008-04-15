@@ -28,6 +28,9 @@ PUB listen(port)
 PUB isConnected
 
   return tcp.isConnected(handle)
+PUB isEOF
+
+  return tcp.isEOF(handle)
 
 PUB resetBuffers
 
@@ -49,7 +52,7 @@ PUB rxflush
 PUB rxcheck
 
   if listening
-    ifnot tcp.isValidHandle(handle)
+    if tcp.isEOF(handle)
       listen(listenport)
 
   return tcp.readByteNonBlocking(handle)
@@ -73,7 +76,7 @@ PUB txcheck(txbyte)
 
 PUB tx(txbyte)
 
-  repeat while txcheck(txbyte) < 0
+  repeat while isConnected and (txcheck(txbyte) < 0)
 
 PUB str(stringptr)                
 

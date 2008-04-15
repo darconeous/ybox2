@@ -205,6 +205,13 @@ PUB rd_sram : data
   eth_out(cRBM)
   data := eth_in
   eth_csoff
+PUB rd_sram_block(data_ptr,size)
+  eth_cson
+  eth_out(cRBM)
+  repeat while size--
+    byte[data_ptr++] := eth_in
+  eth_csoff
+
 
 PUB wr_sram(data)
 '' Write ENC28J60 8k Buffer Memory
@@ -212,6 +219,12 @@ PUB wr_sram(data)
   eth_cson
   eth_out(cWBM)
   eth_out(data)
+  eth_csoff
+PUB wr_sram_block(data_ptr,size)
+  eth_cson
+  eth_out(cWBM)
+  repeat while size--
+    eth_out(byte[data_ptr++])
   eth_csoff
 
 PUB init_ENC28J60 | i
@@ -304,8 +317,9 @@ PUB get_frame | packet_addr, new_rdptr
   
   ' protect from oversized packet
   if rxlen =< MAXFRAME
-    repeat packet_addr from 0 to rxlen - 1
-      BYTE[@packet][packet_addr] := rd_sram
+    rd_sram_block(@packet,rxlen)
+'    repeat packet_addr from 0 to rxlen - 1
+'      BYTE[@packet][packet_addr] := rd_sram
      
   new_rdptr := (packetheader[nextpacket_high] << 8) + packetheader[nextpacket_low]
      
@@ -349,8 +363,11 @@ PUB wr_frame_long(data)
   wr_frame(byte[@data][0])
 
 PUB wr_frame_data(data,len) | i
-  repeat i from 0 to len-1
-    wr_frame(byte[data][i])
+  wr_sram_block(data,len)
+  tx_end+=len
+
+  'repeat i from 0 to len-1
+  '  wr_frame(byte[data][i])
 
 PUB wr_frame_pad(len) | i
   repeat i from 0 to len-1
@@ -418,7 +435,7 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
 
   i:=0
 
-  delay_us(150) ' Too conservative...?
+  delay_us(60) ' Too conservative...?
 
   if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
     return 0

@@ -54,7 +54,7 @@ OBJ
   tv    : "tv"
   gr    : "graphics"
   mouse : "mouse"
-  subsys : "subsys"
+  'subsys : "subsys"
 
 PUB start | i, j, k, kk, dx, dy, pp, pq, rr, numx, numchr
 '  subsys.start
