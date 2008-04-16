@@ -48,12 +48,18 @@ PUB init | i
   
   subsys.init
   term.start(12)
-  term.out(13)
+  term.str(string($0C,7))
   term.str(@productName)
   term.out(13)
   term.str(@productURL)
   term.out(13)
-  term.out(13)
+  term.out($0c)
+  term.out(2)
+  repeat term#cols
+    term.out($90)
+  term.out($0c)
+  term.out(0)
+  'term.out(13)
   
   subsys.StatusLoading
 
@@ -102,11 +108,12 @@ PUB init | i
   HappyChirp
 
   if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
-    term.str(string("Waiting for IP address...",13))
+    term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
       delay_ms(500)
-
-  term.str(string("IPv4 ADDR:"))
+  term.out($0A)
+  term.out($00)  
+  term.str(string("IPv4 ADDR: "))
   repeat i from 0 to 3
     if i
       term.out(".")
@@ -114,7 +121,7 @@ PUB init | i
   term.out(13)  
 
   if settings.getData(settings#NET_IPv4_DNS,@stack,4)
-    term.str(string("DNS ADDR:"))
+    term.str(string("DNS ADDR: "))
     repeat i from 0 to 3
       if i
         term.out(".")

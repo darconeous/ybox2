@@ -201,11 +201,11 @@ tv_params               long    0               'status
 
                         '       fore   back
                         '       color  color
-palette                 byte    $07,   $0A    '0    white / dark blue
+palette                 byte    $07,   $04    '0    white / dark blue
                         byte    $07,   $BB    '1    white / red
-                        byte    $9E,   $9B    '2   yellow / brown
+                        byte    $01,   $04    '2   yellow / brown
                         byte    $04,   $07    '3     grey / white
                         byte    $3D,   $3B    '4     cyan / dark cyan
                         byte    $6B,   $6E    '5    green / gray-green
                         byte    $BB,   $CE    '6      red / pink
-                        byte    $3C,   $0A    '7     cyan / blue
+                        byte    $9E,   $04    '7     cyan / blue

@@ -24,6 +24,9 @@ OBJ
 VAR
   long weatherstack[40] 
   byte path_holder[64]
+DAT
+productName   BYTE      "ybox2 weather",0      
+productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
   
 PUB init | i
   outa[0]:=0
@@ -33,7 +36,17 @@ PUB init | i
   settings.start
   subsys.init
   term.start(12)
-  term.str(string(13,"ybox2 weather",13,"http://www.deepdarc.com/ybox2/",13,13))
+  term.str(string($0C,7))
+  term.str(@productName)
+  term.out(13)
+  term.str(@productURL)
+  term.out(13)
+  term.out($0c)
+  term.out(2)
+  repeat term#cols
+    term.out($90)
+  term.out($0c)
+  term.out(0)
 
   subsys.StatusLoading
 
