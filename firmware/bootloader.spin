@@ -55,8 +55,10 @@ PUB init | i
   term.out(13)
   term.out($0c)
   term.out(2)
-  repeat term#cols
-    term.out($90)
+  repeat term#cols/2
+    term.out($8E)
+    term.out($88)
+    'term.out($86)
   term.out($0c)
   term.out(0)
   'term.out(13)
