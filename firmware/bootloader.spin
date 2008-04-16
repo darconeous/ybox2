@@ -204,7 +204,11 @@ VAR
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
 CR_LF         BYTE      13,10,0
+HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
 HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
+HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
+HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
+
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
@@ -212,8 +216,6 @@ pub httpInterface | char, i, lineLength,contentSize
   webCog:=cogid+1
 
   repeat
-    http.resetBuffers
-    http.close
     repeat while \http.listen(80) == -1
       term.str(string("No free sockets",13))
       if ina[subsys#BTTNPin]
@@ -241,7 +243,7 @@ pub httpInterface | char, i, lineLength,contentSize
     i:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
       httpPath[i]:=char
-      if httpPath[i] == " "
+      if httpPath[i] == " " OR httpPath[i] == "?"
         quit
       i++
     httpPath[i]:=0
@@ -276,19 +278,26 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>"))
+        http.str(string("<html><body><h1>"))
         http.str(@productName)
-        http.str(string("</h1><p><a href='/reboot'>Reboot</a> | <a href='/stage2'>Stage 2</a></p>"))
+        http.str(string("</h1><div><a href='/reboot'>Reboot</a> | <a href='/stage2'>Stage 2</a></div>"))
         if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
-          http.str(string("<p>MAC: "))
+          http.str(string("<div>MAC: <tt>"))
           repeat i from 0 to 5
             if i
               http.tx("-")
             http.hex(byte[@httpQuery][i],2)
-          http.str(string("</p>"))  
-        http.str(string("<p><a href='"))
+          http.str(string("</tt></div>"))
+        http.str(string("<div>Autoboot: "))
+        if settings.findKey(settings#MISC_AUTOBOOT)  
+          http.str(string("<b>ON</b> (<a href='/disable_autoboot'>disable</a>)"))
+        else
+          http.str(string("<b>OFF</b> (<a href='/enable_autoboot'>enable</a>)"))
+        http.str(string("</div><div><a href='"))
         http.str(@productURL)
-        http.str(string("'>More info</a></p>"))
+        http.str(string("'>More info</a></div>"))
+        http.str(string("</body></html>",13,10))
+        
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONTENT_TYPE_HTML)
@@ -309,6 +318,26 @@ pub httpInterface | char, i, lineLength,contentSize
         http.close
         delay_ms(1000)
         boot_stage2
+      elseif strcomp(@httpPath,string("/enable_autoboot"))
+        http.str(@HTTP_303)
+        http.str(string("Location: /",13,10))
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        settings.removeKey($1010)
+        settings.setByte(settings#MISC_AUTOBOOT,1)
+        settings.commit
+        http.str(string("<h1>Autoboot enabled.</h1>",13,10))
+      elseif strcomp(@httpPath,string("/disable_autoboot"))
+        http.str(@HTTP_303)
+        http.str(string("Location: /",13,10))
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        settings.removeKey($1010)
+        settings.removeKey(settings#MISC_AUTOBOOT)
+        settings.commit
+        http.str(string("<h1>Autoboot disabled.</h1>",13,10))
       elseif strcomp(@httpPath,string("/ramimage.bin"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
@@ -317,11 +346,15 @@ pub httpInterface | char, i, lineLength,contentSize
           http.tx(BYTE[i])
       else           
         http.str(@HTTP_404)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>404: Not Found</h1>",13,10))
+        http.str(@HTTP_404)
     elseif strcomp(@httpQuery,string("PUT"))
+      if not contentSize
+          http.str(@HTTP_411)
+          http.str(@HTTP_CONNECTION_CLOSE)
+          http.str(@CR_LF)
+          http.str(@HTTP_411)
       if strcomp(@httpPath,string("/stage2.bin"))
         http.rxtime(1000)
         if (i:=\downloadFirmwareHTTP(contentSize))
@@ -333,7 +366,7 @@ pub httpInterface | char, i, lineLength,contentSize
           http.str(string("<h1>Upload failed.</h1>",13,10))
           http.dec(i)         
         else
-          http.str(string("HTTP/1.1 303 OK",13,10))
+          http.str(@HTTP_303)
           http.str(string("Location: /",13,10))
           http.str(@HTTP_CONTENT_TYPE_HTML)
           http.str(@HTTP_CONNECTION_CLOSE)
@@ -341,23 +374,18 @@ pub httpInterface | char, i, lineLength,contentSize
           http.str(string("<h1>Upload complete.</h1>",13,10))
       else
         http.str(@HTTP_404)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>404: Not Found</h1>",13,10))
+        http.str(@HTTP_404)
     else
-      http.str(string("HTTP/1.1 501 Not Implemented",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_501)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-      http.str(string("<h1>501: Not Implemented</h1>",13,10))
+        http.str(@HTTP_501)
     
     'delay_ms(1500)    
     http.close
     term.str(string(13,"HTTP Closed",13))
-    delay_ms(500)    
-    http.close
-    http.resetBuffers
 
 
 pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j

@@ -47,6 +47,8 @@ DAT
         ip_dhcp_expire  long    0                   ' DHCP expiration
 
 
+        bcast_ipaddr    long    $FFFFFFFF
+        any_ipaddr    long    $00000000
         bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
 
 OBJ
@@ -202,8 +204,8 @@ PRI compose_ip_header(protocol,dst_addr,src_addr)
   nic.wr_frame(ip_maxhops)  ' TTL
   nic.wr_frame(protocol)  ' UDP
   nic.wr_frame_word($00)  ' header checksum (Filled in by hardware)
-  nic.wr_frame_data(@src_addr,4)
-  nic.wr_frame_data(@dst_addr,4)
+  nic.wr_frame_data(src_addr,4)
+  nic.wr_frame_data(dst_addr,4)
 PRI compose_udp_header(dst_port,src_port)
   nic.wr_frame_word(src_port)  ' Source Port
   nic.wr_frame_word(dst_port)  ' Dest Port
@@ -340,7 +342,7 @@ PRI send_bootp_request | i, pkt_len
   nic.start_frame
 
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
-  compose_ip_header(PROT_UDP,$FFFFFFFF,$00000000)
+  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68)
 
   nic.wr_frame($01) ' op (bootrequest)
@@ -403,7 +405,7 @@ PRI dhcp_offer_response | i, ptr
   nic.start_frame
 
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
-  compose_ip_header(PROT_UDP,$FFFFFFFF,$00000000)
+  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68)
 
   nic.wr_frame($01) ' op (bootrequest)
@@ -419,7 +421,7 @@ PRI dhcp_offer_response | i, ptr
 
   nic.wr_frame_pad(2) ' padding ('flags')
 
-  nic.wr_frame_data(@ip_addr,4) 'ciaddr
+  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'ciaddr
   nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
   nic.wr_frame_data(pkt+DHCP_siaddr,4) 'siaddr
   nic.wr_frame_data(pkt+DHCP_giaddr,4) 'giaddr
@@ -578,7 +580,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
-  handle_addr := find_socket(srcip, dstport, srcport)   ' if no sockets avail, it will abort out of this function
+  if (handle_addr := \find_socket(srcip, dstport, srcport))==-1
+    reject_tcp
+    abort handle_addr
   handle := BYTE[handle_addr + sSockIndex]
 
   ' at this point we assume we have an active socket, or a socket available to be used
@@ -669,7 +673,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
 
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
-    LONG[handle_addr + sMySeqNum] := conv_endianlong(++pkt_isn)               ' Initial seq num (random)
+    LONG[handle_addr + sMySeqNum] := randseed?               ' Initial seq num (random)
 
     build_ipheaderskeleton(handle_addr)
     build_tcpskeleton(handle_addr, constant(TCP_SYN | TCP_ACK))
@@ -724,6 +728,41 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
+
+PRI reject_tcp | srcip,dstport,srcport,seq,ack
+  srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
+  dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
+  srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
+
+  bytemove(@seq, pkt + TCP_acknum, 4)
+  bytemove(@ack, pkt + TCP_seqnum, 4)
+  seq:=conv_endianlong(seq)
+  ack:=conv_endianlong(ack)+1
+
+  nic.start_frame
+  compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0800)
+  compose_ip_header(PROT_TCP,pkt+ip_srcaddr,@ip_addr)
+  compose_tcp_header(srcport,dstport,seq,ack,TCP_RST,0)
+  nic.calc_frame_ip_length
+  nic.calc_frame_ip_checksum
+
+  return nic.send_frame
+
+
+PRI compose_tcp_header(srcport,dstport,seq,ack,flags,window)
+  nic.wr_frame_word(srcport)  ' Source Port
+  nic.wr_frame_word(dstport)  ' Dest Port
+  nic.wr_frame_long(seq)
+  nic.wr_frame_long(ack)
+  nic.wr_frame_byte($50)
+  nic.wr_frame_byte(flags)
+  nic.wr_frame_word(window)
+  
+  nic.wr_frame_word($00)  ' TCP checksum
+  nic.wr_frame_word($00)  ' TCP urgent pointer
+  nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
+  
+
     
 PRI build_ipheaderskeleton(handle_addr) | hdrlen, hdr_chksum
   
@@ -876,23 +915,35 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
         send_tcpfinal(handle_addr, i)
     if state == SSYNSENT AND (long[RTCADDR]-LONG[handle_addr + sAge]>5)
       ' If we haven't gotten back an ACK 5 seconds after sending the SYN, forget about it
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_RST)
+      send_tcpfinal(handle_addr, 0)
       LONG[handle_addr + sConState] := SCLOSED
       LONG[handle_addr + sAge] := long[RTCADDR]
 
     if state == SCLOSING
-      ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
-                                         
-      'LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
        
       build_ipheaderskeleton(handle_addr)
-      'build_tcpskeleton(handle_addr, TCP_RST)
-      build_tcpskeleton(handle_addr, TCP_FIN|TCP_ACK)
+      build_tcpskeleton(handle_addr, TCP_FIN)
+      send_tcpfinal(handle_addr, 0)
+
+      ' set socket state, now free
+    '  BYTE[handle_addr + sConState] := SCLOSING2
+    '  LONG[handle_addr + sAge] := long[RTCADDR]
+    'if state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
+      ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
+
+      LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+
+      build_ipheaderskeleton(handle_addr)
+      build_tcpskeleton(handle_addr, TCP_RST)
       send_tcpfinal(handle_addr, 0)
 
       ' set socket state, now free
       BYTE[handle_addr + sConState] := SCLOSED
+      LONG[handle_addr + sAge] := long[RTCADDR]
 
-    elseif state == SCONNECTINGARP1
+    if state == SCONNECTINGARP1
       ' We need to send an arp request
 
       arp_request_checkgateway(handle_addr)
@@ -900,7 +951,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     elseif state == SCONNECTING
       ' Yea! We got an arp response previously, so now we can send the SYN
 
-      LONG[handle_addr + sMySeqNum] := conv_endianlong(++pkt_isn)        
+      LONG[handle_addr + sMySeqNum] := randseed?
       LONG[handle_addr + sMyAckNum] := 0
        
       build_ipheaderskeleton(handle_addr)
@@ -1014,6 +1065,7 @@ PUB close(handle) | handle_addr
   if isConnected(handle)
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
+    repeat while BYTE[handle_addr + sConState]==SCLOSING
   else
     BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
@@ -1022,6 +1074,7 @@ PUB close(handle) | handle_addr
 PUB closeall | handle
   repeat handle from 0 to constant(sNumSockets - 1)
     close(handle)
+    resetBuffers(handle)
     
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise
@@ -1127,6 +1180,7 @@ CON
   SSYNSENT = 2                  ' SYN sent, connection is opening stage 1
   SESTABLISHED = 3              ' established connection (either SYN+ACK, or ACK+Data)
   SCLOSING = 4                  ' connection is being forced closed by code
+  SCLOSING2 = 9                 ' 
   SCONNECTINGARP1 = 5           ' connecting, next step: send arp request
   SCONNECTINGARP2 = 6           ' connecting, next step: arp request sent, waiting for response
   SCONNECTINGARP2G = 7          ' connecting, next step: arp request sent, waiting for response [GATEWAY REQUEST]
@@ -1165,42 +1219,10 @@ tx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
@@ -1231,42 +1253,10 @@ rx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
 
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
               long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
