@@ -26,6 +26,7 @@ OBJ
   settings      : "settings"
   eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
+  numbers       : "numbers"
                                      
 VAR
   long stack[80] 
@@ -42,6 +43,7 @@ PUB init | i
   webCog:=0
 
   settings.start
+  numbers.init
   
   subsys.init
   term.start(12)
@@ -115,8 +117,9 @@ VAR
   byte buffer [128]
   byte buffer2 [128]
   byte webCog
-  byte httpQuery[8]
+  byte httpMethod[8]
   byte httpPath[64]
+  byte httpQuery[64]
   byte httpHeader[32]
 
 DAT
@@ -135,7 +138,7 @@ pub httpInterface | char, i, lineLength,contentSize
 
   repeat
     repeat while \http.listen(80) == -1
-      term.str(string("No free sockets",13))
+      term.str(string("Warning: No free sockets",13))
       if ina[subsys#BTTNPin]
         reboot
       delay_ms(2000)
@@ -150,25 +153,32 @@ pub httpInterface | char, i, lineLength,contentSize
     i:=0
 
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      httpQuery[i]:=char
-      if httpQuery[i] == " "
+      httpMethod[i]:=char
+      if httpMethod[i] == " "
         quit
       i++
-    httpQuery[i]:=0
-    term.str(string("HTTP "))
-    term.str(@httpQuery)
-    term.out(" ")
+    httpMethod[i]:=0
     i:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
       httpPath[i]:=char
-      if httpPath[i] == " " OR httpPath[i] == "?"
+      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
         quit
       i++
-    httpPath[i]:=0
 
-    term.str(@httpPath)
-    term.out(13)
-
+    httpQuery[0]:=0
+    if httpPath[i]=="?"
+      ' If we stopped on a question mark, then grab the query
+      httpPath[i]:=0
+      i:=0
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+        httpQuery[i]:=char
+        if httpQuery[i] == " " OR httpPath[i] == "#"
+          quit
+        i++        
+    else
+      httpPath[i]:=0
+    httpQuery[i]:=0
+  
     lineLength:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
       if (char == 13)
@@ -182,15 +192,13 @@ pub httpInterface | char, i, lineLength,contentSize
             if char == ":"
               httpHeader[lineLength]:=0
               if strcomp(@httpHeader,string("Content-Length"))
-                'content size!
-                term.str(string("contentSize:"))
                 contentSize := http.readDec
                 term.dec(contentSize)
                 term.out(13)
                 lineLength:=1
           lineLength++
              
-    if strcomp(@httpQuery,string("GET"))
+    if strcomp(@httpMethod,string("GET"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONTENT_TYPE_HTML)
@@ -200,17 +208,17 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@productName)
         http.str(string("</h1><hr />"))
         http.str(string("<h2>Info</h2>"))
-        if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
+        if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
           http.str(string("<div>MAC: <tt>"))
           repeat i from 0 to 5
             if i
               http.tx("-")
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
         http.str(string("</div>"))
         http.str(string("<h2>Actions</h2>"))
         http.str(string("<div>Noise: <a href='/chirp'>Chirp</a> | <a href='/groan'>Groan</a></div>"))
-        http.str(string("<div>LED: <a href='/led_red'>Red</a> | <a href='/led_green'>Green</a> | <a href='/led_blue'>Blue</a> | <a href='/led_rainbow'>Rainbow</a></div>"))
+        http.str(string("<div>LED: <a href='/led?ff0000'>Red</a> | <a href='/led?00ff00'>Green</a> | <a href='/led?ffff00'>Yellow</a> | <a href='/led?0000ff'>Blue</a> | <a href='/led_rainbow'>Rainbow</a></div>"))
         http.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
         http.str(string("<h2>Other</h2>"))
         http.str(string("<div><a href='"))
@@ -232,7 +240,6 @@ pub httpInterface | char, i, lineLength,contentSize
       elseif strcomp(@httpPath,string("/chirp"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         HappyChirp
@@ -240,39 +247,33 @@ pub httpInterface | char, i, lineLength,contentSize
       elseif strcomp(@httpPath,string("/groan"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         SadChirp
         http.str(string("OK",13,10))
-      elseif strcomp(@httpPath,string("/led_red"))
+      elseif strcomp(@httpPath,string("/led"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        subsys.statusSolid(255,0,0)
-        http.str(string("OK",13,10))
-      elseif strcomp(@httpPath,string("/led_green"))
+        httpQuery[6]:=0
+        i:=numbers.FromStr(@httpQuery,numbers#HEX)
+        subsys.statusSolid(byte[@i][2],byte[@i][1],byte[@i][0])
+        http.hex(byte[@i][2],2)
+        http.hex(byte[@i][1],2)
+        http.hex(byte[@i][0],2)
+        http.str(string(" OK",13,10))
+      elseif strcomp(@httpPath,string("/print"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        subsys.statusSolid(0,255,0)
-        http.str(string("OK",13,10))
-      elseif strcomp(@httpPath,string("/led_blue"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        subsys.statusSolid(0,0,255)
-        http.str(string("OK",13,10))
+        term.str(@httpQuery)
+        term.out(13)
+        http.str(string(" OK",13,10))
       elseif strcomp(@httpPath,string("/led_rainbow"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         subsys.statusIdle
