@@ -209,13 +209,36 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(string("</h1><hr />"))
         http.str(string("<h2>Info</h2>"))
         if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
-          http.str(string("<div>MAC: <tt>"))
+          http.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
             if i
               http.tx("-")
             http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
-        http.str(string("</div>"))
+        if settings.getData(settings#MISC_UUID,@httpMethod,16)
+          http.str(string("<div><tt>UUID: "))
+          repeat i from 0 to 15
+            'if i
+            '  http.tx(" ")
+            http.hex(byte[@httpMethod][i],2)
+          http.str(string("</tt></div>"))
+        http.str(string("<div><tt>RTC: "))
+        http.dec(subsys.RTC)
+        http.str(string("</tt></div>"))
+        http.str(string("<div><tt>INA: "))
+        repeat i from 0 to 7
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 8 to 15
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 16 to 23
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 23 to 31
+          http.dec(ina[i])          
+        http.str(string("</tt></div>"))
+        
         http.str(string("<h2>Actions</h2>"))
         http.str(string("<div>Noise: <a href='/chirp'>Chirp</a> | <a href='/groan'>Groan</a></div>"))
         http.str(string("<div>LED: <a href='/led?ff0000'>Red</a> | <a href='/led?00ff00'>Green</a> | <a href='/led?ffff00'>Yellow</a> | <a href='/led?0000ff'>Blue</a> | <a href='/led_rainbow'>Rainbow</a></div>"))
