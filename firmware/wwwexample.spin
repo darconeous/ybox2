@@ -193,8 +193,6 @@ pub httpInterface | char, i, lineLength,contentSize
               httpHeader[lineLength]:=0
               if strcomp(@httpHeader,string("Content-Length"))
                 contentSize := http.readDec
-                term.dec(contentSize)
-                term.out(13)
                 lineLength:=1
           lineLength++
              
@@ -322,9 +320,7 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@CR_LF)
         http.str(@HTTP_501)
     
-    'delay_ms(1500)    
     http.close
-    term.str(string(13,"HTTP Closed",13))
 
 
 

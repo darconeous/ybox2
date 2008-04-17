@@ -414,11 +414,13 @@ PUB calc_frame_udp_length | length, ip_len
   wr_sram(length) 
   return length
   
-PUB calc_frame_ip_checksum | crc_start, crc_end, econval, i, crc
+PUB calc_frame_ip_checksum
   ' TODO: This needs to be able to handle different header sizes!
-  return calc_checksum(14,14+20,14+20-10)
-  
-PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
+  return calc_checksum(14,14+20,14+20-10,0)
+PUB calc_frame_icmp_checksum
+  return calc_checksum(14+20+1,tx_end-TXSTART, 14+20+2,1)
+ 
+PUB calc_checksum(crc_start, crc_end, dest,swapped) | econval, i, crc
   crc_start += TXSTART
   crc_end += TXSTART
 
@@ -435,14 +437,18 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
 
   i:=0
 
-  delay_us(60) ' Too conservative...?
+  delay_us(70) ' Too conservative...?
 
   if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
     return 0
   crc_end := dest + TXSTART +1
 
   banksel(EDMACSL)
-  crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
+
+  if swapped
+    crc := rd_cntlreg(EDMACSH) + (rd_cntlreg(EDMACSL) << 8)
+  else
+    crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
   
   ' Now we write out the checksum back to the device
   banksel(EWRPTL)

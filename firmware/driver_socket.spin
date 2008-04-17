@@ -299,6 +299,20 @@ PRI handle_arpreply | handle, handle_addr, ip, found
   if found
     bytemove(handle_addr + sSrcMac, pkt + arp_shaddr, 6)
     BYTE[handle_addr + sConState] := SCONNECTING
+PRI bounce_unreachable(code) | i
+  nic.start_frame
+  compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0800)
+  compose_ip_header(PROT_ICMP,pkt+ip_srcaddr,@ip_addr)
+  nic.wr_frame_byte(3) ' type: destination unreachable
+  nic.wr_frame_byte(code)
+  nic.wr_frame_word(0) ' checksum
+  nic.wr_frame_long(0) ' padding
+  nic.wr_frame_data(pkt+enetpacketData,36)
+  nic.calc_frame_ip_length
+  nic.calc_frame_ip_checksum
+  nic.calc_frame_icmp_checksum
+
+  return nic.send_frame
 
 PRI handle_icmp | i,pkt_len
     case BYTE[pkt][icmp_type]
@@ -331,7 +345,8 @@ PRI handle_icmp | i,pkt_len
         nic.wr_frame_data(pkt,pkt_len)
          
         nic.calc_frame_ip_length
-        nic.calc_checksum(icmp_type+2, pkt_len, icmp_cksum)
+        nic.calc_frame_icmp_checksum
+        'nic.calc_checksum(icmp_type+2, pkt_len, icmp_cksum)
         nic.calc_frame_ip_checksum
 
         ' send the packet
@@ -571,6 +586,9 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   else
     if dstport == 69
       ' TFTP!
+      bounce_unreachable(3)
+    else
+      bounce_unreachable(3)
           
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
@@ -581,6 +599,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
   if (handle_addr := \find_socket(srcip, dstport, srcport))==-1
+    bounce_unreachable(3)
     reject_tcp
     abort handle_addr
   handle := BYTE[handle_addr + sSockIndex]
@@ -1027,6 +1046,9 @@ PUB listen(port) | handle_addr
   if handle_addr < 0
     return -1               
 
+  ' Start with a clean slate
+  bytefill(handle_addr,0,sSocketBytes-1)
+
   LONG[handle_addr + sNxtAck]:=-1 
   WORD[handle_addr + sSrcPort] := 0                     ' no source port yet
   WORD[handle_addr + sDstPort] := conv_endianword(port) ' we do have a dest port though
@@ -1048,6 +1070,9 @@ PUB connect(ip, remoteport, localport) | handle_addr
   if handle_addr < 0
     return -1
 
+  ' Start with a clean slate
+  bytefill(handle_addr,0,sSocketBytes-1)
+  
   ' copy in ip, port data (with respect to the remote host, since we use same code as server)
   LONG[handle_addr + sNxtAck] := -1 
   LONG[handle_addr + sSrcIp] := LONG[ip]
