@@ -15,21 +15,20 @@
 CON
 
   _clkmode = xtal1 + pll16x
-  _xinfreq = 5_000_000                                                      
-
+  _xinfreq = 5_000_000
 OBJ
 
-  tel           : "api_telnet_serial"
+'  tel           : "api_telnet_serial"
   http          : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
-  eeprom        : "Basic_I2C_Driver"
-  random        : "RealRandom"
+'  eeprom        : "Basic_I2C_Driver"
+'  random        : "RealRandom"
   numbers       : "numbers"
                                      
 VAR
-  long stack[80] 
+  long stack[100] 
   byte stage_two
 DAT
 productName   BYTE      "ybox2 webserver example",0      
@@ -79,7 +78,7 @@ PUB init | i
   
   dira[0]:=0
 
-  if not \tel.start(1,2,3,4,6,7,-1,-1)
+  if not \http.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     SadChirp
@@ -111,6 +110,7 @@ PUB init | i
 
   subsys.StatusIdle
  
+'  webCog := cognew(httpInterface, @stack) + 1 
   httpInterface
   
 VAR
@@ -202,7 +202,7 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<html><body><h1>"))
+        http.str(string("<html><head><title>ybox2</title></head><body><h1>"))
         http.str(@productName)
         http.str(string("</h1><hr />"))
         http.str(string("<h2>Info</h2>"))

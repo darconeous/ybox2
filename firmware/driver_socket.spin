@@ -30,7 +30,7 @@ CON
   version = 1.3
   apiversion = 3
   EEPROMPageSize = 128
-  RTCADDR = $7800
+  RTCADDR = $7A00
 
 DAT
         ' Don't set any of these values by hand!
@@ -58,7 +58,7 @@ OBJ
 '  term     : "TV_Text"
 '  subsys   : "subsys"
 VAR
-  long stack[128]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
+  long stack[200]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
   long randseed
   
 DAT             
@@ -106,8 +106,7 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
     settings.removeKey(settings#NET_IPv4_ADDR)
     settings.removeKey(settings#NET_IPv4_MASK)
     settings.removeKey(settings#NET_IPv4_GATE)
-  
-    
+
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
   return cog
   
@@ -120,16 +119,8 @@ PUB stop
 PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
 
   ' Start the ENC28J60 driver in a new cog
-  if macptr == -1
-    nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic
-  else
-    nic.start(cs, sck, si, so, int, xtalout, macptr)                            ' init the nic
-
-  if ipconfigptr <> -1                                                          ' init ip configuration
-    bytemove(@ip_addr, ipconfigptr, 16)
+  nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic
     
-  bytemove(@local_macaddr, nic.get_mac_pointer, 6)                              ' get the mac address
-
   pkt := nic.get_packetpointer
 
   if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
@@ -646,10 +637,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
           send_tcpfinal(handle_addr, 0)
         abort  ' out of space!
 
-    WORD[@rx_head][handle]:=head_work
-
     if LONG[handle_addr + sNxtAck] < 0
       LONG[handle_addr + sNxtAck]:=datain_len 
+
+    WORD[@rx_head][handle]:=head_work
+
  
     ' recalculate ack Num
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
@@ -710,9 +702,10 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     ' We only want to ACK a FIN if we have received everything up to this point.
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_ACK)
-      send_tcpfinal(handle_addr, 0)
+      if LONG[handle_addr + sNxtAck] < 0
+        build_ipheaderskeleton(handle_addr)
+        build_tcpskeleton(handle_addr, TCP_ACK)
+        send_tcpfinal(handle_addr, 0)
       abort  ' Bad sequence Num!
 
     ' get updated sequence and ack numbers (gaurantee we have correct ones to kill connection with)
@@ -726,6 +719,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     send_tcpfinal(handle_addr, 0)
 
     ' set socket state, now free
+    bytefill(handle_addr,0,sSocketBytes-1)
     BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
@@ -744,6 +738,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     '  abort  ' Bad sequence Num!
 
     ' Reset, reset states
+    bytefill(handle_addr,0,sSocketBytes-1)
     BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
@@ -777,7 +772,7 @@ PRI compose_tcp_header(srcport,dstport,seq,ack,flags,window)
   nic.wr_frame_byte(flags)
   nic.wr_frame_word(window)
   
-  nic.wr_frame_word($00)  ' TCP checksum
+  nic.wr_frame_word($00)  ' TCP checksum (work in progress)
   nic.wr_frame_word($00)  ' TCP urgent pointer
   nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
   
@@ -937,19 +932,21 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       build_ipheaderskeleton(handle_addr)
       build_tcpskeleton(handle_addr, TCP_RST)
       send_tcpfinal(handle_addr, 0)
+
+      bytefill(handle_addr,0,sSocketBytes-1)
       LONG[handle_addr + sConState] := SCLOSED
       LONG[handle_addr + sAge] := long[RTCADDR]
 
     if state == SCLOSING
-       
+
       build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_FIN)
+      build_tcpskeleton(handle_addr, TCP_ACK|TCP_FIN)
       send_tcpfinal(handle_addr, 0)
 
       ' set socket state, now free
-    '  BYTE[handle_addr + sConState] := SCLOSING2
-    '  LONG[handle_addr + sAge] := long[RTCADDR]
-    'if state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
+      LONG[handle_addr + sAge] := long[RTCADDR]
+      BYTE[handle_addr + sConState] := SCLOSING2
+    if state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
       ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
 
       LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
@@ -959,6 +956,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       send_tcpfinal(handle_addr, 0)
 
       ' set socket state, now free
+      bytefill(handle_addr,0,sSocketBytes-1)
       BYTE[handle_addr + sConState] := SCLOSED
       LONG[handle_addr + sAge] := long[RTCADDR]
 
@@ -1087,11 +1085,12 @@ PUB connect(ip, remoteport, localport) | handle_addr
 PUB close(handle) | handle_addr
 '' Closes a connection
   handle_addr := @sSockets + (sSocketBytes * handle)
-  if isConnected(handle)
+  if isConnected(handle) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
     repeat while BYTE[handle_addr + sConState]==SCLOSING
   else
+    bytefill(handle_addr,0,sSocketBytes-1)
     BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
     resetBuffers(handle)

@@ -16,7 +16,7 @@ CON
   LED_Brightness = 8 ' 0 = least bright, 8 = most bright
   BTTNPin = 16
   SPKRPin = 8
-  RTCADDR = $7800
+  RTCADDR = $7A00
 DAT
 TMP     long 0
 TMP2    long 0
