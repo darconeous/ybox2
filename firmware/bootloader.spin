@@ -289,20 +289,49 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@CR_LF)
         http.str(string("<html><body><h1>"))
         http.str(@productName)
-        http.str(string("</h1><div><a href='/reboot'>Reboot</a> | <a href='/stage2'>Stage 2</a></div>"))
+        http.str(string("</h1><hr />"))
+        http.str(string("<h2>Info</h2>"))
         if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
-          http.str(string("<div>MAC: <tt>"))
+          http.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
             if i
               http.tx("-")
             http.hex(byte[@httpQuery][i],2)
           http.str(string("</tt></div>"))
-        http.str(string("<div>Autoboot: "))
+        if settings.getData(settings#MISC_UUID,@httpQuery,16)
+          http.str(string("<div><tt>UUID: "))
+          repeat i from 0 to 3
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 4 to 5
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 6 to 7
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 8 to 9
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 10 to 15
+            http.hex(byte[@httpQuery][i],2)
+          http.str(string("</tt></div>"))
+        http.str(string("<div><tt>RTC: "))
+        http.dec(subsys.RTC)
+        http.str(string("</tt></div>"))
+
+        http.str(string("<div><tt>Autoboot: "))
         if settings.findKey(settings#MISC_AUTOBOOT)  
           http.str(string("<b>ON</b> (<a href='/disable_autoboot'>disable</a>)"))
         else
           http.str(string("<b>OFF</b> (<a href='/enable_autoboot'>enable</a>)"))
-        http.str(string("</div><div><a href='"))
+        http.str(string("</tt></div>"))
+        
+        http.str(string("<h2>Actions</h2>"))
+        http.str(string("<div><a href='/reboot'>Reboot</a></div>"))
+        http.str(string("<div><a href='/stage2'>Boot Stage 2</a></div>"))
+
+        http.str(string("<h2>Other</h2>"))
+        http.str(string("<div><a href='"))
         http.str(@productURL)
         http.str(string("'>More info</a></div>"))
         http.str(string("</body></html>",13,10))
@@ -431,6 +460,8 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
         i:=0
+        bytefill(@buffer,0,128)
+        
         term.out(".")
       if total => $8000-settings#SettingsSize
         http.close

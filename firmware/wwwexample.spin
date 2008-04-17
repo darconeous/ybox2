@@ -215,12 +215,22 @@ pub httpInterface | char, i, lineLength,contentSize
               http.tx("-")
             http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
-        if settings.getData(settings#MISC_UUID,@httpMethod,16)
+        if settings.getData(settings#MISC_UUID,@httpQuery,16)
           http.str(string("<div><tt>UUID: "))
-          repeat i from 0 to 15
-            'if i
-            '  http.tx(" ")
-            http.hex(byte[@httpMethod][i],2)
+          repeat i from 0 to 3
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 4 to 5
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 6 to 7
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 8 to 9
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 10 to 15
+            http.hex(byte[@httpQuery][i],2)
           http.str(string("</tt></div>"))
         http.str(string("<div><tt>RTC: "))
         http.dec(subsys.RTC)
