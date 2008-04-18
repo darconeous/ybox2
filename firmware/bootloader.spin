@@ -237,7 +237,7 @@ pri httpParseBase64(data_ptr,data_size) | i,in,char,out,size
     i:=base64_decode_4(@in,data_ptr+size)
     size+=i
     data_size-=i
-  while i AND data_size     
+  while i==3 AND data_size     
   BYTE[data_ptr+size]:=0
   return size
   
