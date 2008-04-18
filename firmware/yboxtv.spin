@@ -293,7 +293,7 @@ OBJ
 VAR
   byte httpMethod[8]
   byte httpPath[64]
-  byte httpQuery[64]
+  byte httpQuery[128]
   byte httpHeader[32]
 
 DAT
@@ -343,7 +343,7 @@ pub httpServer | char, i, lineLength,contentSize
       ' If we stopped on a question mark, then grab the query
       httpPath[i]:=0
       i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<127
         httpQuery[i]:=char
         if httpQuery[i] == " " OR httpPath[i] == "#"
           quit
@@ -419,9 +419,29 @@ pub httpServer | char, i, lineLength,contentSize
         repeat i from 23 to 31
           http.dec(ina[i])          
         http.str(string("</tt></div>"))
+
+        http.str(string("<h2>Settings</h2>"))
+        http.str(string("<form action='\config' method='PUT'>"))
+        http.str(string("<label for='SH'>Server Host</label><input name='SH' id='SH' size='32' value='"))
+        settings.getString(settings#SERVER_HOST,@httpQuery,32)
+        http.strxml(@httpQuery)
+        http.str(string("' /><br />"))
+        http.str(string("<label for='SP'>Server Path</label><input name='SP' id='SP' size='32' value='"))
+        settings.getString(settings#SERVER_PATH,@httpQuery,32)
+        http.strxml(@httpQuery)
+        http.str(string("' /><br />"))
+
+        http.str(string("<label for='SA'>Server Address</label><input name='SA' id='SA' size='32' value='"))
+        settings.getData(settings#SERVER_IPv4_ADDR,@httpQuery,32)
+        http.txip(@httpQuery)
+        http.str(string("' /><br />"))
+
+        http.str(string("<input type='submit' />"))
+        http.str(string("</form>"))
+        
         
         http.str(string("<h2>Actions</h2>"))
-        http.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
+        http.str(string("<div><a href='/reboot'>Reboot</a></div>"))
         http.str(string("<h2>Other</h2>"))
         http.str(string("<div><a href='"))
         http.str(@productURL)
@@ -429,15 +449,19 @@ pub httpServer | char, i, lineLength,contentSize
 
         http.str(string("</body></html>",13,10))
         
+      elseif strcomp(@httpPath,string("/config"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("NOT YET IMPLEMENTED",13,10))
+
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("<h1>Rebooting</h1>",13,10))
-        delay_ms(1000)
         http.close
-        delay_ms(1000)
         reboot
       else           
         http.str(@HTTP_404)

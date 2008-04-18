@@ -91,11 +91,42 @@ PUB tx(txbyte)
 
   repeat while isConnected and (txcheck(txbyte) < 0)
 
+PUB txxml(txbyte)
+  case txbyte
+    "'": str(string("&apos;"))
+    "&": str(string("&amp;"))
+    other: tx(txbyte)
+    
+
+PUB txurl(txbyte)
+  case txbyte
+    "'","#","&",">","<",0..15:
+      tx("%")
+      hex(txbyte,2)
+    other:
+      tx(txbyte)
+
 PUB str(stringptr)                
 
   repeat strsize(stringptr)
     tx(byte[stringptr++])    
 
+PUB strurl(stringptr)                
+
+  repeat strsize(stringptr)
+    txurl(byte[stringptr++])    
+PUB strxml(stringptr)                
+
+  repeat strsize(stringptr)
+    txxml(byte[stringptr++])    
+PUB txip(ip_ptr)
+  dec(byte[ip_ptr][3])
+  tx(".")
+  dec(byte[ip_ptr][2])
+  tx(".")
+  dec(byte[ip_ptr][1])
+  tx(".")
+  dec(byte[ip_ptr][0])
 PUB dec(value) | i
 
 '' Print a decimal number

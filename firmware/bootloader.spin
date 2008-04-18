@@ -351,7 +351,7 @@ pub httpInterface | char, i,j, lineLength,contentSize
         http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>Rebooting</h1>",13,10))
+        http.str(string("REBOOTING",13,10))
         http.close
         reboot
       elseif strcomp(@httpPath,string("/stage2"))
