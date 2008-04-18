@@ -26,7 +26,7 @@ OBJ
   settings      : "settings"
   eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
-                                     
+  base64        : "base64"                                   
 VAR
   long stack[80] 
   byte stage_two
@@ -197,49 +197,6 @@ PRI initial_configuration | i
   settings.commit
   return TRUE
 
-pri base64_tlu(char) | i
-  case char
-    "A".."Z": return char-"A"
-    "a".."z": return char-"a"+26
-    "0".."9": return char-"0"+52
-    "+": return 62
-    "/": return 63
-    other: return 0
-PRI base64_decode_4(inptr,outptr) | retVal,i,out
-  out:=0
-  retVal:=3
-  repeat i from 0 to 3
-    if(BYTE[inptr][i]=="=")
-      case i
-        3: retVal:=2
-        2: retVal:=1
-        1: abort -1
-        0: retVal:=0
-      quit
-    out|=\base64_tlu(BYTE[inptr][i])<<((3-i)*6)
-  if retVal
-    repeat i from 0 to retVal-1
-      BYTE[outptr][i]:=BYTE[@out][2-i]
-  return retVal
-
-pri httpParseBase64(data_ptr,data_size) | i,in,char,out,size
-  size:=0
-  if data_size<4
-    return 0
-  data_size-=3
-  repeat
-    repeat i from 0 to 3
-      repeat while (char:=http.rxtime(1000))==" "
-      if char==-1
-        char:="="
-      BYTE[@in][i]:=char
-     
-    i:=base64_decode_4(@in,data_ptr+size)
-    size+=i
-    data_size-=i
-  while i==3 AND data_size     
-  BYTE[data_ptr+size]:=0
-  return size
   
 VAR
   byte buffer [128]
@@ -356,9 +313,16 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
             if NOT authorized AND strcomp(@httpHeader,string("Authorization"))
               http.rx
               repeat 7 ' Skip the 'Basic' part
-                if http.rx == " "
+                if http.rxtime(1000) == " "
                   quit
-              if \httpParseBase64(@buffer,127) > 0
+              i:=0
+              repeat while i<127 AND ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
+                buffer[i++]:=char
+                if (char == 13)
+                  quit
+              if i
+                buffer[i]:=0
+                base64.inplaceDecode(@buffer)  
                 settings.getString(settings#MISC_PASSWORD,@buffer2,127)
                 authorized:=strcomp(@buffer,@buffer2)
               
@@ -417,6 +381,13 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         else
           http.str(string("<b>OFF</b> "))
           httpOutputLink(string("/autoboot?1"),string("enable"))
+        http.str(string("</tt></div>"))
+
+        http.str(string("<div><tt>Password: "))
+        if settings.findKey(settings#MISC_PASSWORD)
+          http.str(string("SET"))  
+        else
+          http.str(string("NOT SET"))  
         http.str(string("</tt></div>"))
         
         http.str(string("<h2>Actions</h2>"))
