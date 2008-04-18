@@ -185,7 +185,7 @@ PRI compose_ethernet_header(dst_macaddr,src_macaddr,size)
   nic.wr_frame_data(dst_macaddr,6)
   nic.wr_frame_data(src_macaddr,6)
   nic.wr_frame_word(size)
-PRI compose_ip_header(protocol,dst_addr,src_addr)
+PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
   nic.wr_frame($45)        ' ip vesion and header size
   nic.wr_frame($00)        ' TOS
   nic.wr_frame_word($00)  ' IP Packet Length (Will be filled in at a later step)
@@ -197,6 +197,9 @@ PRI compose_ip_header(protocol,dst_addr,src_addr)
   nic.wr_frame_word($00)  ' header checksum (Filled in by hardware)
   nic.wr_frame_data(src_addr,4)
   nic.wr_frame_data(dst_addr,4)
+
+  return protocol + calc_chksumhalf(src_addr, 4) + calc_chksumhalf(dst_addr, 4)
+
 PRI compose_udp_header(dst_port,src_port)
   nic.wr_frame_word(src_port)  ' Source Port
   nic.wr_frame_word(dst_port)  ' Dest Port
@@ -611,17 +614,13 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
       ' ACK response
       if LONG[handle_addr + sNxtAck] < 0
-        build_ipheaderskeleton(handle_addr)
-        build_tcpskeleton(handle_addr, TCP_ACK)
-        send_tcpfinal(handle_addr, 0)
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort  ' Bad sequence Num!
 
     if datain_len > buffer_length
       ' ACK response
       if LONG[handle_addr + sNxtAck] < 0
-        build_ipheaderskeleton(handle_addr)
-        build_tcpskeleton(handle_addr, TCP_ACK)
-        send_tcpfinal(handle_addr, 0)
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort
 
     head_work := WORD[@rx_head][handle]
@@ -635,9 +634,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
       else
         ' ACK response
         if LONG[handle_addr + sNxtAck] < 0
-          build_ipheaderskeleton(handle_addr)
-          build_tcpskeleton(handle_addr, TCP_ACK)
-          send_tcpfinal(handle_addr, 0)
+          send_tcppacket(handle_addr,TCP_ACK,0,0)
         abort  ' out of space!
 
     if LONG[handle_addr + sNxtAck] < 0
@@ -649,11 +646,6 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' recalculate ack Num
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
 
-    ' ACK response
-    'build_ipheaderskeleton(handle_addr)
-    'build_tcpskeleton(handle_addr, TCP_ACK)
-    'send_tcpfinal(handle_addr, 0)
-
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' We got a server response, so we ACK it
 
@@ -664,9 +656,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
 
     ' ACK response
-    build_ipheaderskeleton(handle_addr)
-    build_tcpskeleton(handle_addr, TCP_ACK)
-    send_tcpfinal(handle_addr, 0)
+    send_tcppacket(handle_addr,TCP_ACK,0,0)
 
     ' set socket state, established session
     BYTE[handle_addr + sConState] := SESTABLISHED
@@ -689,9 +679,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
     LONG[handle_addr + sMySeqNum] := randseed?               ' Initial seq num (random)
 
-    build_ipheaderskeleton(handle_addr)
-    build_tcpskeleton(handle_addr, constant(TCP_SYN | TCP_ACK))
-    send_tcpfinal(handle_addr, 0)      
+    send_tcppacket(handle_addr,TCP_SYN|TCP_ACK,0,0)
 
     ' incremement the sequence number for the next packet (it will be for an established connection)                                          
     LONG[handle_addr + sMySeqNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMySeqNum]) + 1)
@@ -706,9 +694,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' We only want to ACK a FIN if we have received everything up to this point.
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
       if LONG[handle_addr + sNxtAck] < 0
-        build_ipheaderskeleton(handle_addr)
-        build_tcpskeleton(handle_addr, TCP_ACK)
-        send_tcpfinal(handle_addr, 0)
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort  ' Bad sequence Num!
 
     ' get updated sequence and ack numbers (gaurantee we have correct ones to kill connection with)
@@ -717,9 +703,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
                                               
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
 
-    build_ipheaderskeleton(handle_addr)
-    build_tcpskeleton(handle_addr, TCP_RST)
-    send_tcpfinal(handle_addr, 0)
+    send_tcppacket(handle_addr,TCP_RST,0,0)
 
     ' set socket state, now free
     bytefill(handle_addr,0,sSocketBytes-1)
@@ -734,11 +718,6 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     LONG[handle_addr + sAge] := long[RTCADDR]
     
   elseif (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_RST) > 0
-    'if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
-    '  build_ipheaderskeleton(handle_addr)
-    '  build_tcpskeleton(handle_addr, TCP_ACK)
-    '  send_tcpfinal(handle_addr, 0)
-    '  abort  ' Bad sequence Num!
 
     ' Reset, reset states
     bytefill(handle_addr,0,sSocketBytes-1)
@@ -757,15 +736,11 @@ PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   bytemove(@ack, pkt + TCP_seqnum, 4)
   seq:=conv_endianlong(seq)
   ack:=conv_endianlong(ack)+1
-
-  chksum := calc_chksumhalf(@BYTE[pkt][ip_srcaddr], 8)
-  chksum += BYTE[pkt][ip_proto]
-  chksum -= TCP_srcport-TCP_data
-  chksum := (chksum >> 16) + (chksum & $FFFF)
   
   nic.start_frame
   compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0800)
-  compose_ip_header(PROT_TCP,pkt+ip_srcaddr,@ip_addr)
+  chksum:=compose_ip_header(PROT_TCP,pkt+ip_srcaddr,@ip_addr)
+  chksum+=TCP_data-TCP_srcport
   compose_tcp_header(srcport,dstport,seq,ack,TCP_RST,0,chksum)
   nic.calc_frame_ip_length
   nic.calc_frame_ip_checksum
@@ -774,7 +749,7 @@ PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   return nic.send_frame
 
 
-PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,cksum)
+PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,chksum)
   nic.wr_frame_word(srcport)  ' Source Port
   nic.wr_frame_word(dstport)  ' Dest Port
   nic.wr_frame_long(seq)
@@ -783,94 +758,29 @@ PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,cksum)
   nic.wr_frame_byte(flags)
   nic.wr_frame_word(window)
   
-  nic.wr_frame_word(cksum)  ' TCP checksum (work in progress)
+  chksum := (chksum >> 16) + (chksum & $FFFF)
+  nic.wr_frame_word(chksum)  ' TCP checksum (work in progress)
   nic.wr_frame_word($00)  ' TCP urgent pointer
   
 
-    
-PRI build_ipheaderskeleton(handle_addr) | hdrlen, hdr_chksum
-  
-  bytemove(pkt + ip_destaddr, handle_addr + sSrcIp, 4)                          ' Set destination address
+PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
 
-  bytemove(pkt + ip_srcaddr, @ip_addr, 4)                                       ' Set source address
-
-  bytemove(pkt + enetpacketDest0, handle_addr + sSrcMac, 6)                     ' Set destination mac address
-
-  bytemove(pkt + enetpacketSrc0, @local_macaddr, 6)                             ' Set source mac address
-
-  BYTE[pkt][enetpacketType0] := $08
-  BYTE[pkt][constant(enetpacketType0 + 1)] := $00
-  
-  BYTE[pkt][ip_vers_len] := $45
-  BYTE[pkt][ip_tos] := $00
-
-  ++pkt_id
-  
-  BYTE[pkt][ip_id] := pkt_id >> 8                                               ' Used for fragmentation
-  BYTE[pkt][constant(ip_id + 1)] := pkt_id
-
-  BYTE[pkt][ip_frag_offset] := $40                                              ' Don't fragment
-  BYTE[pkt][constant(ip_frag_offset + 1)] := 0
-  
-  BYTE[pkt][ip_ttl] := ip_maxhops
-
-  BYTE[pkt][ip_proto] := $06                                                    ' TCP protocol
-
-PRI build_tcpskeleton(handle_addr, flags)
-
-  bytemove(pkt + TCP_srcport, handle_addr + sDstPort, 2)                        ' Source port
-  bytemove(pkt + TCP_destport, handle_addr + sSrcPort, 2)                       ' Destination port
-
-  bytemove(pkt + TCP_seqnum, handle_addr + sMySeqNum, 4)                        ' Seq Num
-  bytemove(pkt + TCP_acknum, handle_addr + sMyAckNum, 4)                        ' Ack Num
-
-  BYTE[pkt][TCP_hdrflags] := $50                                                ' Header length
-  
-  BYTE[pkt][constant(TCP_hdrflags + 1)] := flags                                ' TCP state flags
-
-  BYTE[pkt][TCP_window] := constant(((buffer_length) & $FF00) >> 8)               ' Window size (max data that can be received before ACK must be sent)
-  BYTE[pkt][constant(TCP_window + 1)] := constant((buffer_length) & $FF)          '  we use our buffer_length to ensure our buffer won't get overloaded
-                                                                                '  may cause slowness so some people may want to use $FFFF on high latency networks
-  
-PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
-
-  LONG[handle_addr + sMySeqNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMySeqNum]) + datalen)               ' update running sequence number
-
-  tcplen := 40 + datalen                                                        ' real length = data + headers
-
-  BYTE[pkt][ip_pktlen] := tcplen >> 8
-  BYTE[pkt][constant(ip_pktlen + 1)] := tcplen
-
-  ' ip header checksum (Calculated in hardware)
-  BYTE[pkt][ip_hdr_cksum] := $00
-  BYTE[pkt][constant(ip_hdr_cksum + 1)] := $00
-
-  ' calc checksum
-  BYTE[pkt][TCP_cksum] := $00
-  BYTE[pkt][constant(TCP_cksum + 1)] := $00
-  hdr_chksum := calc_chksumhalf(@BYTE[pkt][ip_srcaddr], 8)
-  hdr_chksum += BYTE[pkt][ip_proto]
-  i := tcplen - ((BYTE[pkt][ip_vers_len] & $0F) * 4)
-  hdr_chksum += i
-  hdr_chksum += calc_chksumhalf(@BYTE[pkt][TCP_srcport], i)
-  hdr_chksum := calc_chksumfinal(hdr_chksum)
-  BYTE[pkt][TCP_cksum] := hdr_chksum >> 8
-  BYTE[pkt][constant(TCP_cksum + 1)] := hdr_chksum
-
-  tcplen += 14
-  if tcplen < 60
-    tcplen := 60
-
-  ' protect from buffer overrun
-  if tcplen => nic#TX_BUFFER_SIZE
-    return
-    
-  ' send the packet
   nic.start_frame
-  nic.wr_frame_data(pkt,tcplen)
+  compose_ethernet_header(handle_addr + sSrcMac,@local_macaddr,$0800)
+  hdr_chksum:=compose_ip_header(PROT_TCP,handle_addr + sSrcIp,@ip_addr)
+  hdr_chksum+=TCP_data-TCP_srcport+datalen
+  compose_tcp_header(conv_endianword(WORD[handle_addr + sSrcPort]),conv_endianword(WORD[handle_addr + sDstPort]),conv_endianlong(LONG[handle_addr + sMySeqNum]),conv_endianlong(LONG[handle_addr + sMyAckNum]),flags,buffer_length,hdr_chksum)
+  if datalen > 0
+    nic.wr_frame_data(data,datalen)
+
+  nic.calc_frame_ip_length
   nic.calc_frame_ip_checksum
+  nic.calc_frame_tcp_checksum
+
   nic.send_frame
 
+  LONG[handle_addr + sMySeqNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMySeqNum]) + datalen)               ' update running sequence number
+    
 
 PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   ' Search for socket, matches ip address, port states
@@ -915,9 +825,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       ' If we have hit out next ack marker, send an ACK
       if LONG[handle_addr + sNxtAck] == 0
         LONG[handle_addr + sNxtAck]--  
-        build_ipheaderskeleton(handle_addr)
-        build_tcpskeleton(handle_addr, TCP_ACK)
-        send_tcpfinal(handle_addr, 0)
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
         
       i := 0
       repeat while WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
@@ -927,17 +835,11 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
           ++i
 
       if i > 0 
-        build_ipheaderskeleton(handle_addr)
-        'if state == SCLOSING
-        '  build_tcpskeleton(handle_addr, constant(TCP_ACK | TCP_PSH | TCP_FIN))
-        'else
-        build_tcpskeleton(handle_addr, constant(TCP_ACK | TCP_PSH))
-        send_tcpfinal(handle_addr, i)
+        send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt+TCP_data,i)
+
     if state == SSYNSENT AND (long[RTCADDR]-LONG[handle_addr + sAge]>5)
       ' If we haven't gotten back an ACK 5 seconds after sending the SYN, forget about it
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_RST)
-      send_tcpfinal(handle_addr, 0)
+      send_tcppacket(handle_addr,TCP_RST,0,0)
 
       bytefill(handle_addr,0,sSocketBytes-1)
       LONG[handle_addr + sConState] := SCLOSED
@@ -945,9 +847,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
 
     if state == SCLOSING
 
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_ACK|TCP_FIN)
-      send_tcpfinal(handle_addr, 0)
+      send_tcppacket(handle_addr,TCP_ACK|TCP_FIN,0,0)
 
       ' set socket state, now free
       LONG[handle_addr + sAge] := long[RTCADDR]
@@ -957,9 +857,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
 
       LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
 
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_RST)
-      send_tcpfinal(handle_addr, 0)
+      send_tcppacket(handle_addr,TCP_RST,0,0)
 
       ' set socket state, now free
       bytefill(handle_addr,0,sSocketBytes-1)
@@ -977,9 +875,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       LONG[handle_addr + sMySeqNum] := randseed?
       LONG[handle_addr + sMyAckNum] := 0
        
-      build_ipheaderskeleton(handle_addr)
-      build_tcpskeleton(handle_addr, TCP_SYN)
-      send_tcpfinal(handle_addr, 0)
+      send_tcppacket(handle_addr,TCP_SYN,0,0)
 
       BYTE[handle_addr + sConState] := SSYNSENT
       LONG[handle_addr + sAge] := long[RTCADDR]
