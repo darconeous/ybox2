@@ -146,8 +146,8 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
         if dhcp_delay < 5000*32
           dhcp_delay *= 2 ' Double the delay time. Exponential back-off.
           dhcp_delay += 255-(randseed? >> 23) ' Add some randomness
-    elseif i > 5
-      ' perform send tick (occurs every 5 cycles, since incoming packets more important)
+    elseif i > 2
+      ' perform send tick (occurs every 2 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
       nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
@@ -818,24 +818,23 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     handle_addr := @sSockets + (sSocketBytes * handle)
     state := BYTE[handle_addr + sConState]
 
-
     if state == SESTABLISHED OR state == SCLOSING
       ' Check to see if we have data to send, if we do, send it
       ' If we have hit out next ack marker, send an ACK
-      if LONG[handle_addr + sNxtAck] == 0
-        LONG[handle_addr + sNxtAck]--  
-        send_tcppacket(handle_addr,TCP_ACK,0,0)
         
-      i := 0
-      repeat while WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
-          ptr := @tx_buffer + (handle * buffer_length)
+      if WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
+        i := 0
+        ptr := @tx_buffer + (handle * buffer_length)
+        repeat
           BYTE[pkt][TCP_data + i] := byte[ptr][WORD[@tx_tail][handle]]
           WORD[@tx_tail][handle] := (WORD[@tx_tail][handle] + 1) & buffer_mask
           ++i
-
-      if i > 0 
+        while WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
         send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt+TCP_data,i)
-
+      elseif LONG[handle_addr + sNxtAck] == 0
+        LONG[handle_addr + sNxtAck]--  
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
+      
     if state == SSYNSENT AND (long[RTCADDR]-LONG[handle_addr + sAge]>5)
       ' If we haven't gotten back an ACK 5 seconds after sending the SYN, forget about it
       send_tcppacket(handle_addr,TCP_RST,0,0)

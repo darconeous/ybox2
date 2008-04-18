@@ -216,13 +216,14 @@ HTTP_200      BYTE      "HTTP/1.1 200 OK"
 CR_LF         BYTE      13,10,0
 HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
 HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
+HTTP_403      BYTE      "HTTP/1.1 403 Forbidden",13,10,0
 HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
 HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
 
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
-pub httpInterface | char, i, lineLength,contentSize
+pub httpInterface | char, i,j, lineLength,contentSize
   webCog:=cogid+1
 
   repeat
@@ -334,6 +335,10 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(string("<h2>Actions</h2>"))
         http.str(string("<div><a href='/reboot'>Reboot</a></div>"))
         http.str(string("<div><a href='/stage2'>Boot Stage 2</a></div>"))
+        http.str(string("<h2>Files</h2>"))
+        http.str(string("<div><a href='/ramimage.bin'>ramimage.bin</a></div>"))
+        http.str(string("<div><a href='/stage2.bin'>stage2.bin</a></div>"))
+        http.str(string("<div><a href='/config.bin'>config.bin</a></div>"))
 
         http.str(string("<h2>Other</h2>"))
         http.str(string("<div><a href='"))
@@ -374,9 +379,38 @@ pub httpInterface | char, i, lineLength,contentSize
       elseif strcomp(@httpPath,string("/ramimage.bin"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(string("Content-Type: application/x-bin",13,10))
+        http.str(string("Content-disposition: attachment; filename=ramimage.bin",13,10))
+        http.str(string("Content-Length: 32768",13,10)) 
         http.str(@CR_LF)
         repeat i from 0 to $7FFF
           http.tx(BYTE[i])
+      elseif strcomp(@httpPath,string("/stage2.bin"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(string("Content-Type: application/x-bin",13,10))
+        http.str(string("Content-disposition: attachment; filename=stage2.bin",13,10))
+        http.str(string("Content-Length: 32768",13,10)) 
+        http.str(@CR_LF)
+        repeat i from 0 to $7FFF step 128
+          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
+            quit
+          repeat j from 0 to 127
+            http.tx(buffer[j])
+      elseif strcomp(@httpPath,string("/config.bin"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(string("Content-Type: application/x-bin",13,10))
+        http.str(string("Content-disposition: attachment; filename=config.bin",13,10))
+        http.str(string("Content-Length: "))
+        http.dec(settings#SettingsSize)
+        http.str(@CR_LF)        
+        http.str(@CR_LF)
+        repeat i from settings#SettingsBottom to settings#SettingsTop step 128
+          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
+            quit
+          repeat j from 0 to 127
+            http.tx(buffer[j])
       else           
         http.str(@HTTP_404)
         http.str(@HTTP_CONNECTION_CLOSE)
@@ -388,7 +422,12 @@ pub httpInterface | char, i, lineLength,contentSize
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
           http.str(@HTTP_411)
-      if strcomp(@httpPath,string("/stage2.bin"))
+      if strcomp(@httpPath,string("/ramimage.bin")) OR strcomp(@httpPath,string("/config.bin"))
+        http.str(@HTTP_403)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(@HTTP_403)
+      elseif strcomp(@httpPath,string("/stage2.bin"))
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
