@@ -419,6 +419,9 @@ PUB calc_frame_ip_checksum
   return calc_checksum(14,14+20,14+20-10,0)
 PUB calc_frame_icmp_checksum
   return calc_checksum(14+20+1,tx_end-TXSTART, 14+20+2,1)
+
+PUB calc_frame_tcp_checksum
+  return calc_checksum(14+20+1,tx_end-TXSTART, $32,1)
  
 PUB calc_checksum(crc_start, crc_end, dest,swapped) | econval, i, crc
   crc_start += TXSTART

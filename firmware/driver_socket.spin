@@ -590,7 +590,6 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
   if (handle_addr := \find_socket(srcip, dstport, srcport))==-1
-    bounce_unreachable(3)
     reject_tcp
     abort handle_addr
   handle := BYTE[handle_addr + sSockIndex]
@@ -598,7 +597,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   ' at this point we assume we have an active socket, or a socket available to be used
   datain_len := ((BYTE[pkt][ip_pktlen] << 8) + BYTE[pkt][constant(ip_pktlen + 1)]) - ((BYTE[pkt][ip_vers_len] & $0F) * 4) - (((BYTE[pkt][TCP_hdrflags] & $F0) >> 4) * 4)
 
-  if (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0 AND datain_len > 0
+  if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
+    reject_tcp
+    abort handle_addr
+
+  elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0 AND datain_len > 0
     ' ACK, without SYN, with data
 
     ' set socket state, established session
@@ -743,7 +746,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
 
-PRI reject_tcp | srcip,dstport,srcport,seq,ack
+PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
+  bounce_unreachable(3)
+
   srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
@@ -753,17 +758,23 @@ PRI reject_tcp | srcip,dstport,srcport,seq,ack
   seq:=conv_endianlong(seq)
   ack:=conv_endianlong(ack)+1
 
+  chksum := calc_chksumhalf(@BYTE[pkt][ip_srcaddr], 8)
+  chksum += BYTE[pkt][ip_proto]
+  chksum -= TCP_srcport-TCP_data
+  chksum := (chksum >> 16) + (chksum & $FFFF)
+  
   nic.start_frame
   compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0800)
   compose_ip_header(PROT_TCP,pkt+ip_srcaddr,@ip_addr)
-  compose_tcp_header(srcport,dstport,seq,ack,TCP_RST,0)
+  compose_tcp_header(srcport,dstport,seq,ack,TCP_RST,0,chksum)
   nic.calc_frame_ip_length
   nic.calc_frame_ip_checksum
+  nic.calc_frame_tcp_checksum
 
   return nic.send_frame
 
 
-PRI compose_tcp_header(srcport,dstport,seq,ack,flags,window)
+PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,cksum)
   nic.wr_frame_word(srcport)  ' Source Port
   nic.wr_frame_word(dstport)  ' Dest Port
   nic.wr_frame_long(seq)
@@ -772,9 +783,8 @@ PRI compose_tcp_header(srcport,dstport,seq,ack,flags,window)
   nic.wr_frame_byte(flags)
   nic.wr_frame_word(window)
   
-  nic.wr_frame_word($00)  ' TCP checksum (work in progress)
+  nic.wr_frame_word(cksum)  ' TCP checksum (work in progress)
   nic.wr_frame_word($00)  ' TCP urgent pointer
-  nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
   
 
     
@@ -834,10 +844,6 @@ PRI send_tcpfinal(handle_addr, datalen) | i, tcplen, hdrlen, hdr_chksum
   ' ip header checksum (Calculated in hardware)
   BYTE[pkt][ip_hdr_cksum] := $00
   BYTE[pkt][constant(ip_hdr_cksum + 1)] := $00
-  'hdrlen := (BYTE[pkt][ip_vers_len] & $0F) * 4
-  'hdr_chksum := calc_chksum(@BYTE[pkt][ip_vers_len], hdrlen)  
-  'BYTE[pkt][ip_hdr_cksum] := hdr_chksum >> 8
-  'BYTE[pkt][constant(ip_hdr_cksum + 1)] := hdr_chksum
 
   ' calc checksum
   BYTE[pkt][TCP_cksum] := $00
