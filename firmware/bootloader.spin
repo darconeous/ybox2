@@ -230,10 +230,6 @@ RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
 STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 
-
-
-
-
 pri httpOutputLink(url,content)
   http.str(string("<a href='"))
   http.strxml(url)
@@ -270,7 +266,19 @@ pri httpParseRequest(method,path,query) | i,char
       BYTE[path][i]:=0
       BYTE[query][0]:=0
 
+pri httpUnauthorized
+  http.str(@HTTP_401)
+  http.str(@HTTP_CONNECTION_CLOSE)
+  http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  http.str(@CR_LF)
+  http.str(@HTTP_401)
 
+pri httpNotFound
+  http.str(@HTTP_404)
+  http.str(@HTTP_CONNECTION_CLOSE)
+  http.str(@CR_LF)
+  http.str(@HTTP_404)
+   
 pub httpServer | char, i,j, lineLength,contentSize,authorized
   webCog:=cogid+1
 
@@ -288,7 +296,6 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
       http.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         boot_stage2
-    i:=0
 
     httpParseRequest(@httpMethod,@httpPath,@httpQuery)
 
@@ -310,7 +317,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
             if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
               contentSize := http.readDec
               lineLength:=1
-            if NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+            elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
               http.rx
               repeat 7 ' Skip the 'Basic' part
                 if http.rxtime(1000) == " "
@@ -328,12 +335,15 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
               
           lineLength++
 
+    ' Authorization check
+    ' You can comment this out if you want to
+    ' be able to let unauthorized people see the
+    ' front page. They won't be able to upload
+    ' or download firmware, or change settings
+    ' without being authorized because those
+    ' actions check for authorization anyway.
     ifnot authorized
-      http.str(@HTTP_401)
-      http.str(@HTTP_CONNECTION_CLOSE)
-      http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
-      http.str(@CR_LF)
-      http.str(@HTTP_401)
+      httpUnauthorized
       next
              
     if strcomp(@httpMethod,string("GET"))
@@ -415,7 +425,6 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("REBOOTING",13,10))
@@ -428,7 +437,19 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(string("BOOTING STAGE 2",13,10))
         http.close
         boot_stage2
+      elseif strcomp(@httpPath,string("/login"))
+        ifnot authorized
+          httpUnauthorized
+          next
+        http.str(@HTTP_303)
+        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/autoboot"))
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_303)
         http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         http.str(@HTTP_CONNECTION_CLOSE)
@@ -443,7 +464,10 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           http.str(string("DISABLED",13,10))
-      elseif strcomp(@httpPath,string("/ramimage.eeprom"))
+      elseif strcomp(@httpPath,RAMIMAGE_EEPROM_FILE)
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
@@ -452,7 +476,10 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(@CR_LF)
         repeat i from 0 to $7FFF
           http.tx(BYTE[i])
-      elseif strcomp(@httpPath,string("/stage2.eeprom"))
+      elseif strcomp(@httpPath,STAGE2_EEPROM_FILE)
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
@@ -464,7 +491,10 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
             quit
           repeat j from 0 to 127
             http.tx(buffer[j])
-      elseif strcomp(@httpPath,string("/config.bin"))
+      elseif strcomp(@httpPath,@CONFIG_BIN_FILE)
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-bin"))        
@@ -480,22 +510,22 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
           repeat j from 0 to 127
             http.tx(buffer[j])
       else           
-        http.str(@HTTP_404)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_404)
+        httpNotFound
     elseif strcomp(@httpMethod,string("PUT"))
+      ifnot authorized
+        httpUnauthorized
+        next
       if not contentSize
           http.str(@HTTP_411)
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
           http.str(@HTTP_411)
-      if strcomp(@httpPath,string("/ramimage.eeprom")) OR strcomp(@httpPath,string("/config.bin"))
+      if strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE) OR strcomp(@httpPath,@CONFIG_BIN_FILE)
         http.str(@HTTP_403)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(@HTTP_403)
-      elseif strcomp(@httpPath,string("/stage2.eeprom"))
+      elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
@@ -520,10 +550,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
             http.str(@CR_LF)
             http.str(string("OK",13,10))
       else
-        http.str(@HTTP_404)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_404)
+        httpNotFound
     else
       http.str(@HTTP_501)
       http.str(@HTTP_CONNECTION_CLOSE)
@@ -621,8 +648,6 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
         subsys.StatusSolid(0,255,0)
         settings.setWord($1010,total)
         return 0
-        'delay_ms(5000)     ' 5 sec delay
-
 
 
   return 0
