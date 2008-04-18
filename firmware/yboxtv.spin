@@ -142,6 +142,9 @@ PUB main | ircode
 
   cognew(WeatherUpdate, @weatherstack) 
 
+  httpServer
+  return
+  
   repeat while true
     ircode:=ir.fifo_get
     if ircode <> -1
@@ -285,4 +288,167 @@ pub SadChirp | i
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
-     
+OBJ
+  http          : "api_telnet_serial"
+VAR
+  byte httpMethod[8]
+  byte httpPath[64]
+  byte httpQuery[64]
+  byte httpHeader[32]
+
+DAT
+HTTP_200      BYTE      "HTTP/1.1 200 OK"
+CR_LF         BYTE      13,10,0
+HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
+HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
+HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
+HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
+
+HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
+HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
+
+pub httpServer | char, i, lineLength,contentSize
+
+  repeat
+    repeat while \http.listen(80) == -1
+      term.str(string("Warning: No free sockets",13))
+      if ina[subsys#BTTNPin]
+        reboot
+      delay_ms(2000)
+      http.closeall
+      next
+    http.resetBuffers
+    contentSize:=0
+    repeat while NOT http.isConnected
+      http.waitConnectTimeout(100)
+      if ina[subsys#BTTNPin]
+        reboot
+    i:=0
+
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
+      httpMethod[i]:=char
+      if httpMethod[i] == " "
+        quit
+      i++
+    httpMethod[i]:=0
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      httpPath[i]:=char
+      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
+        quit
+      i++
+
+    httpQuery[0]:=0
+    if httpPath[i]=="?"
+      ' If we stopped on a question mark, then grab the query
+      httpPath[i]:=0
+      i:=0
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+        httpQuery[i]:=char
+        if httpQuery[i] == " " OR httpPath[i] == "#"
+          quit
+        i++        
+    else
+      httpPath[i]:=0
+    httpQuery[i]:=0
+  
+    lineLength:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
+      if (char == 13)
+        ifnot lineLength
+          quit
+        lineLength:=0
+      else
+        if (char <> 10)
+          if lineLength<31
+            httpHeader[lineLength]:=char
+            if char == ":"
+              httpHeader[lineLength]:=0
+              if strcomp(@httpHeader,string("Content-Length"))
+                contentSize := http.readDec
+                lineLength:=1
+          lineLength++
+             
+    if strcomp(@httpMethod,string("GET"))
+      if strcomp(@httpPath,string("/"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("<html><head><title>ybox2</title></head><body><h1>"))
+        http.str(@productName)
+        http.str(string("</h1><hr />"))
+        http.str(string("<h2>Info</h2>"))
+        if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
+          http.str(string("<div><tt>MAC: "))
+          repeat i from 0 to 5
+            if i
+              http.tx("-")
+            http.hex(byte[@httpMethod][i],2)
+          http.str(string("</tt></div>"))
+        if settings.getData(settings#MISC_UUID,@httpQuery,16)
+          http.str(string("<div><tt>UUID: "))
+          repeat i from 0 to 3
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 4 to 5
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 6 to 7
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 8 to 9
+            http.hex(byte[@httpQuery][i],2)
+          http.tx("-")
+          repeat i from 10 to 15
+            http.hex(byte[@httpQuery][i],2)
+          http.str(string("</tt></div>"))
+        http.str(string("<div><tt>RTC: "))
+        http.dec(subsys.RTC)
+        http.str(string("</tt></div>"))
+        http.str(string("<div><tt>INA: "))
+        repeat i from 0 to 7
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 8 to 15
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 16 to 23
+          http.dec(ina[i])
+        http.tx(" ")
+        repeat i from 23 to 31
+          http.dec(ina[i])          
+        http.str(string("</tt></div>"))
+        
+        http.str(string("<h2>Actions</h2>"))
+        http.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
+        http.str(string("<h2>Other</h2>"))
+        http.str(string("<div><a href='"))
+        http.str(@productURL)
+        http.str(string("'>More info</a></div>"))
+
+        http.str(string("</body></html>",13,10))
+        
+      elseif strcomp(@httpPath,string("/reboot"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("<h1>Rebooting</h1>",13,10))
+        delay_ms(1000)
+        http.close
+        delay_ms(1000)
+        reboot
+      else           
+        http.str(@HTTP_404)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(@HTTP_404)
+    else
+        http.str(@HTTP_501)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(@HTTP_501)
+    
+    http.close
+ 

@@ -206,8 +206,9 @@ VAR
   byte buffer [128]
   byte buffer2 [128]
   byte webCog
-  byte httpQuery[8]
+  byte httpMethod[8]
   byte httpPath[64]
+  byte httpQuery[64]
   byte httpHeader[32]
 
 DAT
@@ -241,25 +242,32 @@ pub httpInterface | char, i, lineLength,contentSize
     i:=0
 
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      httpQuery[i]:=char
-      if httpQuery[i] == " "
+      httpMethod[i]:=char
+      if httpMethod[i] == " "
         quit
       i++
-    httpQuery[i]:=0
-    term.str(string("HTTP "))
-    term.str(@httpQuery)
-    term.out(" ")
+    httpMethod[i]:=0
     i:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
       httpPath[i]:=char
-      if httpPath[i] == " " OR httpPath[i] == "?"
+      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
         quit
       i++
-    httpPath[i]:=0
 
-    term.str(@httpPath)
-    term.out(13)
-
+    httpQuery[0]:=0
+    if httpPath[i]=="?"
+      ' If we stopped on a question mark, then grab the query
+      httpPath[i]:=0
+      i:=0
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+        httpQuery[i]:=char
+        if httpQuery[i] == " " OR httpPath[i] == "#"
+          quit
+        i++        
+    else
+      httpPath[i]:=0
+    httpQuery[i]:=0
+  
     lineLength:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
       if (char == 13)
@@ -273,15 +281,12 @@ pub httpInterface | char, i, lineLength,contentSize
             if char == ":"
               httpHeader[lineLength]:=0
               if strcomp(@httpHeader,string("Content-Length"))
-                'content size!
-                term.str(string("contentSize:"))
                 contentSize := http.readDec
-                term.dec(contentSize)
-                term.out(13)
                 lineLength:=1
           lineLength++
+    http.rxtime(1000)
              
-    if strcomp(@httpQuery,string("GET"))
+    if strcomp(@httpMethod,string("GET"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONTENT_TYPE_HTML)
@@ -291,29 +296,29 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@productName)
         http.str(string("</h1><hr />"))
         http.str(string("<h2>Info</h2>"))
-        if settings.getData(settings#NET_MAC_ADDR,@httpQuery,6)
+        if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
           http.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
             if i
               http.tx("-")
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
-        if settings.getData(settings#MISC_UUID,@httpQuery,16)
+        if settings.getData(settings#MISC_UUID,@httpMethod,16)
           http.str(string("<div><tt>UUID: "))
           repeat i from 0 to 3
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.tx("-")
           repeat i from 4 to 5
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.tx("-")
           repeat i from 6 to 7
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.tx("-")
           repeat i from 8 to 9
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.tx("-")
           repeat i from 10 to 15
-            http.hex(byte[@httpQuery][i],2)
+            http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
         http.str(string("<div><tt>RTC: "))
         http.dec(subsys.RTC)
@@ -321,9 +326,9 @@ pub httpInterface | char, i, lineLength,contentSize
 
         http.str(string("<div><tt>Autoboot: "))
         if settings.findKey(settings#MISC_AUTOBOOT)  
-          http.str(string("<b>ON</b> (<a href='/disable_autoboot'>disable</a>)"))
+          http.str(string("<b>ON</b> (<a href='/autoboot?0'>disable</a>)"))
         else
-          http.str(string("<b>OFF</b> (<a href='/enable_autoboot'>enable</a>)"))
+          http.str(string("<b>OFF</b> (<a href='/autoboot?1'>enable</a>)"))
         http.str(string("</tt></div>"))
         
         http.str(string("<h2>Actions</h2>"))
@@ -342,40 +347,30 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("<h1>Rebooting</h1>",13,10))
-        delay_ms(1000)
         http.close
-        delay_ms(1000)
         reboot
       elseif strcomp(@httpPath,string("/stage2"))
         http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>Booting to stage 2</h1>",13,10))
-        delay_ms(1000)
+        http.str(string("BOOTING STAGE 2",13,10))
         http.close
-        delay_ms(1000)
         boot_stage2
-      elseif strcomp(@httpPath,string("/enable_autoboot"))
+      elseif strcomp(@httpPath,string("/autoboot"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        settings.removeKey($1010)
-        settings.setByte(settings#MISC_AUTOBOOT,1)
-        settings.commit
-        http.str(string("<h1>Autoboot enabled.</h1>",13,10))
-      elseif strcomp(@httpPath,string("/disable_autoboot"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONTENT_TYPE_HTML)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        settings.removeKey($1010)
-        settings.removeKey(settings#MISC_AUTOBOOT)
-        settings.commit
-        http.str(string("<h1>Autoboot disabled.</h1>",13,10))
+        if strcomp(@httpQuery,string("1"))
+          settings.removeKey($1010)
+          settings.setByte(settings#MISC_AUTOBOOT,1)
+          settings.commit
+          http.str(string("ENABLED",13,10))
+        else
+          settings.removeKey($1010)
+          settings.removeKey(settings#MISC_AUTOBOOT)
+          settings.commit
+          http.str(string("DISABLED",13,10))
       elseif strcomp(@httpPath,string("/ramimage.bin"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
@@ -387,43 +382,48 @@ pub httpInterface | char, i, lineLength,contentSize
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(@HTTP_404)
-    elseif strcomp(@httpQuery,string("PUT"))
+    elseif strcomp(@httpMethod,string("PUT"))
       if not contentSize
           http.str(@HTTP_411)
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
           http.str(@HTTP_411)
       if strcomp(@httpPath,string("/stage2.bin"))
-        http.rxtime(1000)
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
-          http.str(@HTTP_CONTENT_TYPE_HTML)
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
-          http.str(string("<h1>Upload failed.</h1>",13,10))
+          http.str(string("Upload Failure",13,10))
           http.dec(i)         
-        else
-          http.str(@HTTP_303)
-          http.str(string("Location: /",13,10))
-          http.str(@HTTP_CONTENT_TYPE_HTML)
-          http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
-          http.str(string("<h1>Upload complete.</h1>",13,10))
+        else
+          if strcomp(@httpQuery,string("boot"))
+            http.str(@HTTP_303)
+            http.str(string("Location: /",13,10))
+            http.str(@HTTP_CONNECTION_CLOSE)
+            http.str(@CR_LF)
+            http.str(string("OK - Booting stage 2",13,10))
+            http.close
+            boot_stage2
+          else
+            http.str(@HTTP_303)
+            http.str(string("Location: /",13,10))
+            http.str(@HTTP_CONNECTION_CLOSE)
+            http.str(@CR_LF)
+            http.str(string("OK",13,10))
       else
         http.str(@HTTP_404)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(@HTTP_404)
     else
-        http.str(@HTTP_501)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_501)
+      http.str(@HTTP_501)
+      http.str(@HTTP_CONNECTION_CLOSE)
+      http.str(@CR_LF)
+      http.str(@HTTP_501)
     
-    'delay_ms(1500)    
     http.close
-    term.str(string(13,"HTTP Closed",13))
 
 
 pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j

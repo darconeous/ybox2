@@ -19,7 +19,6 @@ CON
 OBJ
 
 '  tel           : "api_telnet_serial"
-  http          : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
@@ -39,8 +38,6 @@ PUB init | i
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
   
-  webCog:=0
-
   settings.start
   numbers.init
   
@@ -110,13 +107,33 @@ PUB init | i
 
   subsys.StatusIdle
  
-'  webCog := cognew(httpInterface, @stack) + 1 
-  httpInterface
+  httpServer
+
+PUB showMessage(str)
+  term.str(string($1,$B,12,$C,$1))    
+  term.str(str)    
+  term.str(string($C,$8))    
+
+pub HappyChirp | i, j
+  repeat j from 0 to 2
+    repeat i from 0 to 30
+      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
+      delay_ms(1)
+    outa[subsys#SPKRPin]:=0  
+    delay_ms(50)
+pub SadChirp | i
+
+  repeat i from 0 to 15
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
+    delay_ms(17)
+  outa[subsys#SPKRPin]:=0  
+
+PRI delay_ms(Duration)
+  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
+OBJ
+  http          : "api_telnet_serial"
 VAR
-  byte buffer [128]
-  byte buffer2 [128]
-  byte webCog
   byte httpMethod[8]
   byte httpPath[64]
   byte httpQuery[64]
@@ -133,8 +150,7 @@ HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
-pub httpInterface | char, i, lineLength,contentSize
-  webCog:=cogid+1
+pub httpServer | char, i, lineLength,contentSize
 
   repeat
     repeat while \http.listen(80) == -1
@@ -324,25 +340,4 @@ pub httpInterface | char, i, lineLength,contentSize
 
 
 
-PUB showMessage(str)
-  term.str(string($1,$B,12,$C,$1))    
-  term.str(str)    
-  term.str(string($C,$8))    
-
-pub HappyChirp | i, j
-  repeat j from 0 to 2
-    repeat i from 0 to 30
-      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-      delay_ms(1)
-    outa[subsys#SPKRPin]:=0  
-    delay_ms(50)
-pub SadChirp | i
-
-  repeat i from 0 to 15
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    delay_ms(17)
-  outa[subsys#SPKRPin]:=0  
-
-PRI delay_ms(Duration)
-  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   

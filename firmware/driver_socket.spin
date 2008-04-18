@@ -200,11 +200,11 @@ PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
 
   return protocol + calc_chksumhalf(src_addr, 4) + calc_chksumhalf(dst_addr, 4)
 
-PRI compose_udp_header(dst_port,src_port)
+PRI compose_udp_header(dst_port,src_port,chksum)
   nic.wr_frame_word(src_port)  ' Source Port
   nic.wr_frame_word(dst_port)  ' Dest Port
   nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
-  nic.wr_frame_word($00)  ' UDP checksum
+  nic.wr_frame_word(chksum)  ' UDP checksum
 PRI arp_request(ip1, ip2, ip3, ip4) | i
   nic.start_frame
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0806)
@@ -352,7 +352,7 @@ PRI send_bootp_request | i, pkt_len
 
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68)
+  compose_udp_header(67,68,0)
 
   nic.wr_frame($01) ' op (bootrequest)
   nic.wr_frame($01) ' htype
@@ -415,7 +415,7 @@ PRI dhcp_offer_response | i, ptr
 
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68)
+  compose_udp_header(67,68,0)
 
   nic.wr_frame($01) ' op (bootrequest)
   nic.wr_frame($01) ' htype
@@ -490,9 +490,8 @@ PRI dhcp_offer_response | i, ptr
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
   
-  'UDP Checksum, but missing the pseudo ip appendage.
-  'Not a problem, because in UDP the checksum is optional.
-  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
+  'UDP Checksum, which is optional. Leaving it out because it isn't finished.
+  'nic.calc_frame_udp_checksum
 
   return nic.send_frame
    

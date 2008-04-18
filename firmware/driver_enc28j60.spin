@@ -416,15 +416,22 @@ PUB calc_frame_udp_length | length, ip_len
   
 PUB calc_frame_ip_checksum
   ' TODO: This needs to be able to handle different header sizes!
-  return calc_checksum(14,14+20,14+20-10,0)
+  return calc_checksum(14,14+20,14+20-10)
 PUB calc_frame_icmp_checksum
-  return calc_checksum(14+20+1,tx_end-TXSTART, 14+20+2,1)
+  return calc_checksum(34,tx_end-TXSTART, 36)
 
 PUB calc_frame_tcp_checksum
-  return calc_checksum(14+20+1,tx_end-TXSTART, $32,1)
+'' For this to work, the partial checksum of the pseudo header needs
+'' to be in the checksum field.
+  return calc_checksum(34,tx_end-TXSTART, $32)
+
+PUB calc_frame_udp_checksum
+'' For this to work, the partial checksum of the pseudo header needs
+'' to be in the checksum field.
+  return calc_checksum(34,tx_end-TXSTART, 38)
  
-PUB calc_checksum(crc_start, crc_end, dest,swapped) | econval, i, crc
-  crc_start += TXSTART
+PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
+  crc_start += TXSTART+1
   crc_end += TXSTART
 
   banksel(EDMASTL)
@@ -448,17 +455,17 @@ PUB calc_checksum(crc_start, crc_end, dest,swapped) | econval, i, crc
 
   banksel(EDMACSL)
 
-  if swapped
-    crc := rd_cntlreg(EDMACSH) + (rd_cntlreg(EDMACSL) << 8)
-  else
-    crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
+  'if swapped
+  'crc := rd_cntlreg(EDMACSH) + (rd_cntlreg(EDMACSL) << 8)
+  'else
+  crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
   
   ' Now we write out the checksum back to the device
   banksel(EWRPTL)
-  wr_reg(EWRPTL, crc_end)
   wr_reg(EWRPTH, crc_end >> 8)
-  wr_sram(crc) 
+  wr_reg(EWRPTL, crc_end)
   wr_sram(crc>>8) 
+  wr_sram(crc) 
   return 1
 
   
