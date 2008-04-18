@@ -136,16 +136,11 @@ PUB init | i
       delay_ms(5)
   else
     subsys.StatusIdle
+
+  'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
  
 
-  'webCog := cognew(httpInterface, @stack) + 1 
-  httpInterface
-  'repeat
-  '  \downloadFirmware
-  '  tel.close
-  '  subsys.StatusFatalError
-  '  SadChirp
-  '  delay_ms(1000)
+  httpServer
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
@@ -177,7 +172,7 @@ PRI initial_configuration | i
 
   random.stop
 
-  'settings.setString(settings#MISC_PASSWORD,string("password"))  
+  'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
 
   
   ' Uncomment and change these settings if you don't want to use DHCP
@@ -201,6 +196,50 @@ PRI initial_configuration | i
 
   settings.commit
   return TRUE
+
+pri base64_tlu(char) | i
+  case char
+    "A".."Z": return char-"A"
+    "a".."z": return char-"a"+26
+    "0".."9": return char-"0"+52
+    "+": return 62
+    "/": return 63
+    other: return 0
+PRI base64_decode_4(inptr,outptr) | retVal,i,out
+  out:=0
+  retVal:=3
+  repeat i from 0 to 3
+    if(BYTE[inptr][i]=="=")
+      case i
+        3: retVal:=2
+        2: retVal:=1
+        1: abort -1
+        0: retVal:=0
+      quit
+    out|=\base64_tlu(BYTE[inptr][i])<<((3-i)*6)
+  if retVal
+    repeat i from 0 to retVal-1
+      BYTE[outptr][i]:=BYTE[@out][2-i]
+  return retVal
+
+pri httpParseBase64(data_ptr,data_size) | i,in,char,out,size
+  size:=0
+  if data_size<4
+    return 0
+  data_size-=3
+  repeat
+    repeat i from 0 to 3
+      repeat while (char:=http.rxtime(1000))==" "
+      if char==-1
+        char:="="
+      BYTE[@in][i]:=char
+     
+    i:=base64_decode_4(@in,data_ptr+size)
+    size+=i
+    data_size-=i
+  while i AND data_size     
+  BYTE[data_ptr+size]:=0
+  return size
   
 VAR
   byte buffer [128]
@@ -217,13 +256,65 @@ CR_LF         BYTE      13,10,0
 HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
 HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
 HTTP_403      BYTE      "HTTP/1.1 403 Forbidden",13,10,0
+HTTP_401      BYTE      "HTTP/1.1 401 Authorization Required",13,10,0
 HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
 HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
 
-HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
+HTTP_HEADER_SEP     BYTE ": ",0
+HTTP_HEADER_CONTENT_TYPE BYTE "Content-Type",0
+HTTP_HEADER_LOCATION     BYTE "Location",0
+HTTP_HEADER_CONTENT_DISPOS     BYTE "Content-disposition",0
+HTTP_HEADER_CONTENT_LENGTH     BYTE "Content-Length",0
+
+HTTP_CONTENT_TYPE_HTML  BYTE "text/html; charset=utf-8",0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
-pub httpInterface | char, i,j, lineLength,contentSize
+RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
+STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
+CONFIG_BIN_FILE         BYTE "/config.bin",0
+
+
+
+
+
+pri httpOutputLink(url,content)
+  http.str(string("<a href='"))
+  http.strxml(url)
+  http.str(string("'>"))
+  http.str(content)
+  http.str(string("</a>"))
+  
+pri httpParseRequest(method,path,query) | i,char
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
+      BYTE[method][i]:=char
+      if char == " "
+        quit
+      i++
+    BYTE[method][i]:=0
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      BYTE[path][i]:=char
+      if char == " " OR char == "?"  OR char == "#"
+        quit
+      i++
+
+    if BYTE[path][i]=="?"
+      ' If we stopped on a question mark, then grab the query
+      BYTE[path][i]:=0
+      i:=0
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+        BYTE[query][i]:=char
+        if char == " " OR char == "#" OR char == 13
+          quit
+        i++        
+      BYTE[query][i]:=0
+    else
+      BYTE[path][i]:=0
+      BYTE[query][0]:=0
+
+
+pub httpServer | char, i,j, lineLength,contentSize,authorized
   webCog:=cogid+1
 
   repeat
@@ -242,36 +333,14 @@ pub httpInterface | char, i,j, lineLength,contentSize
         boot_stage2
     i:=0
 
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      httpMethod[i]:=char
-      if httpMethod[i] == " "
-        quit
-      i++
-    httpMethod[i]:=0
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-      httpPath[i]:=char
-      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
-        quit
-      i++
+    httpParseRequest(@httpMethod,@httpPath,@httpQuery)
 
-    httpQuery[0]:=0
-    if httpPath[i]=="?"
-      ' If we stopped on a question mark, then grab the query
-      httpPath[i]:=0
-      i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-        httpQuery[i]:=char
-        if httpQuery[i] == " " OR httpPath[i] == "#"
-          quit
-        i++        
-    else
-      httpPath[i]:=0
-    httpQuery[i]:=0
-  
+    authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
+    
     lineLength:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
       if (char == 13)
+        http.rxtime(1000)
         ifnot lineLength
           quit
         lineLength:=0
@@ -279,18 +348,34 @@ pub httpInterface | char, i,j, lineLength,contentSize
         if (char <> 10)
           if lineLength<31
             httpHeader[lineLength]:=char
-            if char == ":"
-              httpHeader[lineLength]:=0
-              if strcomp(@httpHeader,string("Content-Length"))
-                contentSize := http.readDec
-                lineLength:=1
+          if char == ":"
+            httpHeader[lineLength]:=0
+            if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
+              contentSize := http.readDec
+              lineLength:=1
+            if NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+              http.rx
+              repeat 7 ' Skip the 'Basic' part
+                if http.rx == " "
+                  quit
+              if \httpParseBase64(@buffer,127) > 0
+                settings.getString(settings#MISC_PASSWORD,@buffer2,127)
+                authorized:=strcomp(@buffer,@buffer2)
+              
           lineLength++
-    http.rxtime(1000)
+
+    ifnot authorized
+      http.str(@HTTP_401)
+      http.str(@HTTP_CONNECTION_CLOSE)
+      http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+      http.str(@CR_LF)
+      http.str(@HTTP_401)
+      next
              
     if strcomp(@httpMethod,string("GET"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("<html><body><h1>"))
@@ -327,28 +412,39 @@ pub httpInterface | char, i,j, lineLength,contentSize
 
         http.str(string("<div><tt>Autoboot: "))
         if settings.findKey(settings#MISC_AUTOBOOT)  
-          http.str(string("<b>ON</b> (<a href='/autoboot?0'>disable</a>)"))
+          http.str(string("<b>ON</b> :"))
+          httpOutputLink(string("/autoboot?0"),string("disable"))
         else
-          http.str(string("<b>OFF</b> (<a href='/autoboot?1'>enable</a>)"))
+          http.str(string("<b>OFF</b> "))
+          httpOutputLink(string("/autoboot?1"),string("enable"))
         http.str(string("</tt></div>"))
         
         http.str(string("<h2>Actions</h2>"))
-        http.str(string("<div><a href='/reboot'>Reboot</a></div>"))
-        http.str(string("<div><a href='/stage2'>Boot Stage 2</a></div>"))
+        http.str(string("<div>"))
+        httpOutputLink(string("/reboot"),string("Reboot"))
+        http.tx(" ")
+        httpOutputLink(string("/stage2"),string("Boot stage 2"))
+        http.str(string("</div>"))
+        
+
         http.str(string("<h2>Files</h2>"))
-        http.str(string("<div><a href='/ramimage.bin'>ramimage.bin</a></div>"))
-        http.str(string("<div><a href='/stage2.bin'>stage2.bin</a></div>"))
-        http.str(string("<div><a href='/config.bin'>config.bin</a></div>"))
+        http.str(string("<div>"))
+        httpOutputLink(@RAMIMAGE_EEPROM_FILE,@RAMIMAGE_EEPROM_FILE+1)
+        http.tx(" ")
+        httpOutputLink(@STAGE2_EEPROM_FILE,@STAGE2_EEPROM_FILE+1)
+        http.tx(" ")
+        httpOutputLink(@CONFIG_BIN_FILE,@CONFIG_BIN_FILE+1)
+        http.str(string("</div>"))
 
         http.str(string("<h2>Other</h2>"))
-        http.str(string("<div><a href='"))
-        http.str(@productURL)
-        http.str(string("'>More info</a></div>"))
+        http.str(string("<div>"))
+        httpOutputLink(@productURL,@productURL)
+        http.str(string("</div>"))
         http.str(string("</body></html>",13,10))
         
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("REBOOTING",13,10))
@@ -363,10 +459,10 @@ pub httpInterface | char, i,j, lineLength,contentSize
         boot_stage2
       elseif strcomp(@httpPath,string("/autoboot"))
         http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
+        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        if strcomp(@httpQuery,string("1"))
+        if httpQuery[0]=="1"
           settings.removeKey($1010)
           settings.setByte(settings#MISC_AUTOBOOT,1)
           settings.commit
@@ -376,21 +472,21 @@ pub httpInterface | char, i,j, lineLength,contentSize
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           http.str(string("DISABLED",13,10))
-      elseif strcomp(@httpPath,string("/ramimage.bin"))
+      elseif strcomp(@httpPath,string("/ramimage.eeprom"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(string("Content-Type: application/x-bin",13,10))
-        http.str(string("Content-disposition: attachment; filename=ramimage.bin",13,10))
-        http.str(string("Content-Length: 32768",13,10)) 
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
+        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=ramimage.eeprom"))        
+        http.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
         http.str(@CR_LF)
         repeat i from 0 to $7FFF
           http.tx(BYTE[i])
-      elseif strcomp(@httpPath,string("/stage2.bin"))
+      elseif strcomp(@httpPath,string("/stage2.eeprom"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(string("Content-Type: application/x-bin",13,10))
-        http.str(string("Content-disposition: attachment; filename=stage2.bin",13,10))
-        http.str(string("Content-Length: 32768",13,10)) 
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
+        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
+        http.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
         http.str(@CR_LF)
         repeat i from 0 to $7FFF step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
@@ -400,9 +496,10 @@ pub httpInterface | char, i,j, lineLength,contentSize
       elseif strcomp(@httpPath,string("/config.bin"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(string("Content-Type: application/x-bin",13,10))
-        http.str(string("Content-disposition: attachment; filename=config.bin",13,10))
-        http.str(string("Content-Length: "))
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-bin"))        
+        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.bin"))        
+        http.str(@HTTP_HEADER_CONTENT_LENGTH)
+        http.str(string(": "))
         http.dec(settings#SettingsSize)
         http.str(@CR_LF)        
         http.str(@CR_LF)
@@ -422,12 +519,12 @@ pub httpInterface | char, i,j, lineLength,contentSize
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
           http.str(@HTTP_411)
-      if strcomp(@httpPath,string("/ramimage.bin")) OR strcomp(@httpPath,string("/config.bin"))
+      if strcomp(@httpPath,string("/ramimage.eeprom")) OR strcomp(@httpPath,string("/config.bin"))
         http.str(@HTTP_403)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(@HTTP_403)
-      elseif strcomp(@httpPath,string("/stage2.bin"))
+      elseif strcomp(@httpPath,string("/stage2.eeprom"))
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
@@ -439,7 +536,7 @@ pub httpInterface | char, i,j, lineLength,contentSize
         else
           if strcomp(@httpQuery,string("boot"))
             http.str(@HTTP_303)
-            http.str(string("Location: /",13,10))
+            http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             http.str(@HTTP_CONNECTION_CLOSE)
             http.str(@CR_LF)
             http.str(string("OK - Booting stage 2",13,10))
@@ -447,7 +544,7 @@ pub httpInterface | char, i,j, lineLength,contentSize
             boot_stage2
           else
             http.str(@HTTP_303)
-            http.str(string("Location: /",13,10))
+            http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             http.str(@HTTP_CONNECTION_CLOSE)
             http.str(@CR_LF)
             http.str(string("OK",13,10))

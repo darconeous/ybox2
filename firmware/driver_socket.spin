@@ -93,7 +93,8 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   randseed := random.random
   random.stop
 
-  settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6)
+  ifnot settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6)
+    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)  
   settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
   settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
   settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
@@ -366,7 +367,7 @@ PRI send_bootp_request | i, pkt_len
 
   nic.wr_frame_word($00) ' padding
 
-  nic.wr_frame_data(@ip_addr,4) 'ciaddr
+  nic.wr_frame_pad(4) 'ciaddr
   nic.wr_frame_pad(4) 'yiaddr
   nic.wr_frame_pad(4) 'siaddr
   nic.wr_frame_pad(4) 'giaddr

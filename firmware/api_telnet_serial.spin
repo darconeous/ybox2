@@ -127,6 +127,11 @@ PUB txip(ip_ptr)
   dec(byte[ip_ptr][1])
   tx(".")
   dec(byte[ip_ptr][0])
+PUB txmimeheader(name,value)
+  str(name)
+  str(string(": "))
+  str(value)
+  str(string(13,10))
 PUB dec(value) | i
 
 '' Print a decimal number
