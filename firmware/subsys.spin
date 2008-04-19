@@ -37,14 +37,14 @@ PUB init | LED_Conf
     LEDGMask:=1<<BYTE[@LED_Conf][1]
     LEDBMask:=1<<BYTE[@LED_Conf][2]
     if BYTE[@LED_Conf][3]
-      LEDRJmp += %1001_000000000_000000000 ' Invert Red output
-      LEDGJmp += %1001_000000000_000000000 ' Invert Green Output
-      LEDBJmp += %1001_000000000_000000000 ' Invert Blue Output
+      LEDRJmp ^= %1111_000000000_000000000 ' Invert Red output
+      LEDGJmp ^= %1111_000000000_000000000 ' Invert Green Output
+      LEDBJmp ^= %1111_000000000_000000000 ' Invert Blue Output
   else
     if LED_CA
-      LEDRJmp += %1001_000000000_000000000 ' Invert Red output
-      LEDGJmp += %1001_000000000_000000000 ' Invert Green Output
-      LEDBJmp += %1001_000000000_000000000 ' Invert Blue Output
+      LEDRJmp ^= %1111_000000000_000000000 ' Invert Red output
+      LEDGJmp ^= %1111_000000000_000000000 ' Invert Green Output
+      LEDBJmp ^= %1111_000000000_000000000 ' Invert Blue Output
        
   subsyscog := cognew(@run, @LED_R)+1 
   StatusIdle
@@ -83,10 +83,9 @@ PUB FatalErrorCycle
   LED_G:=0
   LED_B:=0
   repeat while 1
-    repeat while LED_R<>255
-      LED_R++
+    repeat LED_R from 0 to 254
       waitcnt(20_000 + cnt)
-    repeat while LED_R
+    repeat LED_R from 255 to 1
       LED_R--
       waitcnt(20_000 + cnt)
   
@@ -95,12 +94,9 @@ PUB LoadingCycle
   LED_G:=0
   LED_B:=0
   repeat while 1
-'    long[RTCADDR]++
-    repeat while LED_B<>255
-      LED_B++
+    repeat LED_B from 0 to 254
       waitcnt(100_000 + cnt)
-    repeat while LED_B
-      LED_B--
+    repeat LED_B from 255 to 1
       waitcnt(100_000 + cnt)
 
 PUB ColorCycle
@@ -108,8 +104,7 @@ PUB ColorCycle
   LED_R:=0
   LED_G:=0
   LED_B:=0
-  repeat while LED_G<>255
-    LED_G++
+  repeat LED_G from 0 to 254
     waitcnt(400_000 + cnt)
   repeat while 1
     repeat while LED_G

@@ -58,10 +58,8 @@ PUB init | i
   repeat term#cols/2
     term.out($8E)
     term.out($88)
-    'term.out($86)
   term.out($0c)
   term.out(0)
-  'term.out(13)
   
   subsys.StatusLoading
 
@@ -76,10 +74,13 @@ PUB init | i
     delay_ms(2000)
     if NOT ina[subsys#BTTNPin]
       boot_stage2
+    else
+      term.str(string("Autoboot Aborted.",13))
+      SadChirp    
 
   if NOT settings.size
     if NOT \initial_configuration
-      showMessage(string("Initial configuration failed!"))
+      term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
       SadChirp
       waitcnt(clkfreq*100000 + cnt)
@@ -92,13 +93,39 @@ PUB init | i
         term.out("-")
       term.hex(byte[@stack][i],2)
     term.out(13)  
+  
+  dira[0]:=0
 
   if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
     dira[subsys#SPKRPin]:=1
   else
     dira[subsys#SPKRPin]:=0
-  
-  dira[0]:=0
+
+  ' If the user is holding down the button, wait two seconds.
+  repeat 10
+    if ina[subsys#BTTNPin]
+      delay_ms(200)
+    
+  ' If the button is still being held down, then
+  ' assume we are in a password reset condition.
+  if ina[subsys#BTTNPin]
+    HappyChirp
+    SadChirp
+    HappyChirp
+    SadChirp
+    HappyChirp
+    if ina[subsys#BTTNPin]
+      term.str(string("RESET MODE",13))
+      SadChirp
+      settings.removeKey(settings#MISC_PASSWORD)  
+      settings.removeKey(settings#MISC_AUTOBOOT)
+      settings.removeKey(settings#NET_DHCPv4_DISABLE)
+      settings.removeKey(settings#MISC_SOUND_DISABLE)
+      settings.removeKey($1010)
+      settings.removeKey(settings#MISC_STAGE_TWO)
+      settings.commit
+      HappyChirp
+      reboot
 
   if not \tel.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
@@ -138,8 +165,7 @@ PUB init | i
     subsys.StatusIdle
 
   'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
- 
-
+      
   httpServer
   
 PRI boot_stage2 | i
@@ -147,10 +173,6 @@ PRI boot_stage2 | i
   repeat i from 0 to 7
     if cogid<>i
       cogstop(i)
-  'subsys.stop
-  'settings.stop
-  'term.stop
-  'tel.stop
   ' Replace this cog with the bootloader
   coginit(0,@bootstage2,0)
   cogstop(cogid)
@@ -177,7 +199,7 @@ PRI initial_configuration | i
   
   ' Uncomment and change these settings if you don't want to use DHCP
   {
-  settings.setByte(settings#NET_DHCP_DISABLE,TRUE)
+  settings.setByte(settings#NET_DHCPv4_DISABLE,TRUE)
   settings.setData(settings#NET_IPv4_ADDR,string(192,168,2,10),4)
   settings.setData(settings#NET_IPv4_MASK,string(255,255,255,0),4)
   settings.setData(settings#NET_IPv4_GATE,string(192,168,2,1),4)
@@ -185,7 +207,7 @@ PRI initial_configuration | i
   }
 
   ' If you want sound off by default, uncomment the next line
-  'settings.setByte(settings#SOUND_DISABLE,TRUE)
+  'settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
 
   'settings.setByte(settings#MISC_AUTOBOOT,TRUE)
 
@@ -299,6 +321,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
 
     httpParseRequest(@httpMethod,@httpPath,@httpQuery)
 
+    ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
     
     lineLength:=0
@@ -718,8 +741,8 @@ launch                  rdword  address,#$0004+2        'if pbase address invali
 '
 shutdown
                         'jmp shutdown
-                        'mov     smode,#$1FF              'reboot actualy
-                        mov     smode,#$02              'reboot actualy
+                        mov     smode,#$1FF              'reboot actualy
+                        'mov     smode,#$02              'reboot actualy
                         clkset  smode                   '(reboot)
 '                       
 '
