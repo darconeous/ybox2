@@ -476,7 +476,10 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
             term.out(13)
           else
             term.out(char)
-        httpUnauthorized
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        http.str(string("NOT YET IMPLEMENTED.",13,10))
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)

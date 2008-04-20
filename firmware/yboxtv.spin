@@ -460,10 +460,9 @@ pub httpServer | char, i, lineLength,contentSize
 
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<h1>Rebooting</h1>",13,10))
+        http.str(string("REBOOTING",13,10))
         http.close
         reboot
       else           
