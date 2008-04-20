@@ -279,12 +279,15 @@ pub HappyChirp | i, j
     repeat i from 0 to 30
       outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
       delay_ms(1)
+    outa[subsys#SPKRPin]:=0
     delay_ms(50)
 pub SadChirp | i
 
   repeat i from 0 to 15
     outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
     delay_ms(17)
+  outa[subsys#SPKRPin]:=0
+    
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   

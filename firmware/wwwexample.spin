@@ -298,6 +298,14 @@ pub httpServer | char, i, lineLength,contentSize
         http.str(@CR_LF)
         SadChirp
         http.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/toggle"))
+        http.str(@HTTP_303)
+        http.str(string("Location: /",13,10))
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        dira[30]:=1
+        outa[30]:=!outa[30]
+        http.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/led"))
         http.str(@HTTP_303)
         http.str(string("Location: /",13,10))

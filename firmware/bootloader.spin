@@ -158,9 +158,8 @@ PUB init | i
     term.out(13)  
 
   if stage_two
-    repeat i from 0 to 255
-      subsys.StatusSolid(i,i,i)
-      delay_ms(5)
+    subsys.StatusSolid(255,255,255)
+    term.str(string("BOOTLOADER UPGRADE",13,"STAGE TWO",13))
   else
     subsys.StatusIdle
 
@@ -369,7 +368,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
       httpUnauthorized
       next
              
-    if strcomp(@httpMethod,string("GET"))
+    if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
@@ -422,12 +421,30 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         else
           http.str(string("NOT SET"))  
         http.str(string("</tt></div>"))
+
+
+        if authorized
+          http.str(string("<form action='\password' method='POST'>"))
+          http.str(string("<div><label for='username'>Username:</label><input name='username' id='username' size='32' value='"))
+          http.strxml(string("admin"))
+          http.str(string("' /></div>"))
+          http.str(string("<div><label for='pwd1'>Password:</label><input name='pwd1' id='pwd1' type='password' size='32' /></div>"))
+          http.str(string("<div><label for='pwd2'>Password:</label><input name='pwd2' id='pwd2' type='password' size='32' /></div>"))
+           
+          http.str(string("<input type='submit' />"))
+          http.str(string("</form>"))
+           
+
+
         
         http.str(string("<h2>Actions</h2>"))
         http.str(string("<div>"))
         httpOutputLink(string("/reboot"),string("Reboot"))
         http.tx(" ")
         httpOutputLink(string("/stage2"),string("Boot stage 2"))
+        ifnot authorized
+          http.tx(" ")
+          httpOutputLink(string("/login"),string("Login"))
         http.str(string("</div>"))
         
 
@@ -446,6 +463,20 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(string("</div>"))
         http.str(string("</body></html>",13,10))
         
+      elseif strcomp(@httpPath,string("/password"))
+        ifnot authorized
+          httpUnauthorized
+          next
+        i:=0
+        repeat while contentSize AND i<127
+          char:=http.rxtime(1000)
+          buffer[i++]:=char
+          contentSize--
+          if char=="&" OR char==-1
+            term.out(13)
+          else
+            term.out(char)
+        httpUnauthorized
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
@@ -551,6 +582,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         if (i:=\downloadFirmwareHTTP(contentSize))
           SadChirp
+          subsys.StatusFatalError
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
@@ -558,14 +590,19 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
           http.dec(i)         
           http.str(@CR_LF)
         else
-          if strcomp(@httpQuery,string("boot"))
+          if strcomp(@httpQuery,string("boot")) OR stage_two
             http.str(@HTTP_303)
             http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             http.str(@HTTP_CONNECTION_CLOSE)
             http.str(@CR_LF)
-            http.str(string("OK - Booting stage 2",13,10))
-            http.close
-            boot_stage2
+            if stage_two
+              http.str(string("OK - Rebooting",13,10))
+              http.close
+              reboot
+            else
+              http.str(string("OK - Booting stage 2",13,10))
+              http.close
+              boot_stage2
           else
             http.str(@HTTP_303)
             http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
@@ -610,6 +647,7 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
             abort -1
           repeat i from 0 to 127
             if buffer[i] <> buffer2[i]
+              term.str(string(13,"Verify failed.",13))
               abort -2
         else
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
@@ -629,26 +667,30 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
           ' Do we have the correct number of bytes?
           if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))
             SadChirp
+            term.out(13)
             term.dec((total+i) - settings.getWord($1010))
             term.str(string(" byte diff!",13))
             abort -4                     
 
           'Verify that the bytes we got match the EEPROM
-          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
-            abort -1
-          repeat j from 0 to i-1
-            if buffer[j] <> buffer2[j]
-              abort -5
+          if i
+            if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
+              abort -1
+            repeat j from 0 to i-1
+              if buffer[j] <> buffer2[j]
+                term.str(string(13,"Verify failed: "))
+                term.dec(buffer[j])
+                term.out(" ")
+                term.dec(buffer2[j])
+                abort -5
 
           total+=i
 
           'If we got to this point, then everything matches! Write it out
           subsys.StatusLoading
           HappyChirp
-          
-          term.str(string("verified!",13))
 
-          term.str(string("Writing"))
+          term.str(string(13,"Writing",13))
 
           repeat i from 0 to total-1 step 128
             if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
@@ -657,10 +699,29 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
               abort -7
             repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
             term.out(".")
+          ' Now we need to fill in the rest of the image with zeros.
+          bytefill(@buffer,0,128)
+          repeat j from i to $8000-settings#SettingsSize step 128
+            subsys.StatusSolid(0,0,128)
+            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, j, @buffer, 128)
+              abort -9
+            subsys.StatusSolid(0,128,0)
+            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, j)
+            term.out(".")
         else
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             abort -8
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
+          ' Now we need to fill in the rest of the image with zeros.
+          bytefill(@buffer,0,128)
+          repeat j from total+128 to $8000-settings#SettingsSize-1 step 128
+            subsys.StatusSolid(0,0,128)
+            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, j+addr, @buffer, 128)
+              abort -9
+            subsys.StatusSolid(0,128,0)
+            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
+            term.out(".")
+
           total+=i
         
         ' done!
