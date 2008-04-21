@@ -299,7 +299,31 @@ pri httpNotFound
   http.str(@HTTP_CONNECTION_CLOSE)
   http.str(@CR_LF)
   http.str(@HTTP_404)
-   
+pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
+  i:=0
+  repeat while BYTE[packeddataptr]
+    if BYTE[packeddataptr]=="=" 'AND strsize(keystring)==i
+      packeddataptr++
+      i:=0
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
+         BYTE[outvalue][i++]:=byte[packeddataptr++]
+      BYTE[outvalue][i]:=0
+      return i
+    if BYTE[packeddataptr] <> BYTE[keystring][i]
+      ' skip to &
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&"
+        packeddataptr++
+      ifnot byte[packeddataptr] 
+        quit
+      packeddataptr++
+      i:=0
+    else
+      packeddataptr++
+      i++  
+      
+
+  return 0
+     
 pub httpServer | char, i,j, lineLength,contentSize,authorized
   webCog:=cogid+1
 
@@ -364,9 +388,9 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
     ' or download firmware, or change settings
     ' without being authorized because those
     ' actions check for authorization anyway.
-    ifnot authorized
-      httpUnauthorized
-      next
+    'ifnot authorized
+    '  httpUnauthorized
+    '  next
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
@@ -472,14 +496,37 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
           char:=http.rxtime(1000)
           buffer[i++]:=char
           contentSize--
-          if char=="&" OR char==-1
-            term.out(13)
+        buffer[i]:=0
+        buffer2[0]:=0
+        i:=httpGetField(@buffer,string("username"),@buffer2,127)
+        if i
+          buffer2[i++]:=":"
+          j:=httpGetField(@buffer,string("pwd1"),@buffer2+i,63)
+          ifnot j
+             i:=0
           else
-            term.out(char)
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("NOT YET IMPLEMENTED.",13,10))
+            j:=httpGetField(@buffer,string("pwd2"),@httpQuery,63)
+          if j==0 OR NOT strcomp(@httpQuery,@buffer2+i)
+             i:=0
+
+        ifnot i
+          http.str(string("HTTP/1.1 400 Bad Request",13,10))
+          http.str(@HTTP_CONNECTION_CLOSE)
+          http.str(@CR_LF)
+          http.str(string("Passwords didn't match.",13,10))
+        else
+          term.str(@buffer2)
+          term.out(13)
+
+          settings.removeKey($1010)
+          settings.setString(settings#MISC_PASSWORD,@buffer2)  
+          settings.commit
+           
+          http.str(@HTTP_303)
+          http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+          http.str(@HTTP_CONNECTION_CLOSE)
+          http.str(@CR_LF)
+          http.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/reboot"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
