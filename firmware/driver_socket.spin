@@ -124,8 +124,8 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
     
   pkt := nic.get_packetpointer
 
-  if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
-    send_bootp_request
+  if NOT has_valid_ip_addr
+    send_dhcp_request
     
   i := 0
   dhcp_delay := 5000 + 255 - (randseed? >> 23)
@@ -139,9 +139,9 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
       nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
     ++i
-    if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
+    if NOT has_valid_ip_addr
       if i > dhcp_delay
-        send_bootp_request
+        send_dhcp_request
         i := 0
         nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
         if dhcp_delay < 5000*32
@@ -161,23 +161,26 @@ PRI service_packet
   ' check for arp packet type (highest priority obviously)
   if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $06
     if BYTE[pkt][constant(arp_hwtype + 1)] == $01 AND BYTE[pkt][arp_prtype] == $08 AND BYTE[pkt][constant(arp_prtype + 1)] == $00 AND BYTE[pkt][arp_hwlen] == $06 AND BYTE[pkt][arp_prlen] == $04
-'      if LONG[pkt+arp_tipaddr] == LONG[@ip_addr]
-      if BYTE[pkt][arp_tipaddr] == ip_addr[0] AND BYTE[pkt][constant(arp_tipaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(arp_tipaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(arp_tipaddr + 3)] == ip_addr[3]
+      if compare_ipaddr(pkt+arp_tipaddr,@ip_addr)
         case BYTE[pkt][constant(arp_op + 1)]
           $01 : handle_arp
           $02 : handle_arpreply
         '++count_arp
-  elseif long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
+  elseif NOT has_valid_ip_addr
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00 AND BYTE[pkt][ip_proto] == PROT_UDP
       handle_udp 
   else
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00
-'      if LONG[pkt+ip_destaddr] == LONG[@ip_addr]
-      if BYTE[pkt][ip_destaddr] == ip_addr[0] AND BYTE[pkt][constant(ip_destaddr + 1)] == ip_addr[1] AND BYTE[pkt][constant(ip_destaddr + 2)] == ip_addr[2] AND BYTE[pkt][constant(ip_destaddr + 3)] == ip_addr[3]
+      if compare_ipaddr(pkt+ip_destaddr,@ip_addr)
         case BYTE[pkt][ip_proto]
           PROT_ICMP : \handle_icmp
           PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
           PROT_UDP :  \handle_udp
+
+PRI compare_ipaddr(ip1ptr,ip2ptr)
+  return BYTE[ip1ptr][0] == BYTE[ip2ptr][0] AND BYTE[ip1ptr][1] == BYTE[ip2ptr][1] AND BYTE[ip1ptr][2] == BYTE[ip2ptr][2] AND BYTE[ip1ptr][3] == BYTE[ip2ptr][3]
+PRI has_valid_ip_addr
+  return long[@ip_addr] AND ip_dhcp_expire > long[RTCADDR]
 
 ' *******************************
 ' ** Protocol Receive Handlers **
@@ -206,10 +209,8 @@ PRI compose_udp_header(dst_port,src_port,chksum)
   nic.wr_frame_word(dst_port)  ' Dest Port
   nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
   nic.wr_frame_word(chksum)  ' UDP checksum
-PRI arp_request(ip1, ip2, ip3, ip4) | i
-  nic.start_frame
-  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0806)
 
+PRI compose_arp(type,lmac,lip,rmac,rip)
   nic.wr_frame_word($0001)        ' 10mb ethernet
 
   nic.wr_frame_word($0800)             ' ip proto
@@ -217,55 +218,32 @@ PRI arp_request(ip1, ip2, ip3, ip4) | i
   nic.wr_frame($06)             ' mac addr len
   nic.wr_frame($04)             ' proto addr len
 
-  nic.wr_frame_word($0001)             ' arp request
+  nic.wr_frame_word(type)       'type
 
   ' write ethernet module mac address
-  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_data(lmac,6)
 
   ' write ethernet module ip address
-  nic.wr_frame_data(@ip_addr,4)
+  nic.wr_frame_data(lip,4)
 
-  ' unknown mac address area
-  nic.wr_frame_pad(6)
+  ' write remote mac address
+  nic.wr_frame_data(rmac,6)
 
-  ' figure out if we need router arp request or host arp request
-  ' this means some subnet masking
+  ' write remote ip address
+  nic.wr_frame_data(rip,4)
 
-  ' dest ip address
-  nic.wr_frame(ip1)
-  nic.wr_frame(ip2)
-  nic.wr_frame(ip3)
-  nic.wr_frame(ip4)
 
-  ' send the request
+PRI arp_request(rip) | i
+  nic.start_frame
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0806)
+  compose_arp(1,@local_macaddr,@ip_addr,@bcast_macaddr,rip)
   return nic.send_frame
 
 
 PRI handle_arp | i
   nic.start_frame
   compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0806)
-
-  nic.wr_frame_word($0001)        ' 10mb ethernet
-
-  nic.wr_frame_word($0800)             ' ip proto
-
-  nic.wr_frame($06)             ' mac addr len
-  nic.wr_frame($04)             ' proto addr len
-
-  nic.wr_frame_word($0002)             ' arp reply
-
-  ' write ethernet module mac address
-  nic.wr_frame_data(@local_macaddr,6)
-
-  ' write ethernet module ip address
-  nic.wr_frame_data(@ip_addr,4)
-
-  ' write remote mac address
-  nic.wr_frame_data(pkt+enetpacketSrc0,6)
-
-  ' write remote ip address
-  nic.wr_frame_data(pkt+arp_sipaddr,4)
-
+  compose_arp(2,@local_macaddr,@ip_addr,pkt+enetpacketSrc0,pkt+arp_sipaddr)
   return nic.send_frame
 
 
@@ -341,12 +319,38 @@ PRI handle_icmp | i,pkt_len
          
         nic.calc_frame_ip_length
         nic.calc_frame_icmp_checksum
-        'nic.calc_checksum(icmp_type+2, pkt_len, icmp_cksum)
         nic.calc_frame_ip_checksum
 
         ' send the packet
         nic.send_frame
-PRI send_bootp_request | i, pkt_len
+
+PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
+  nic.wr_frame(op) ' op (bootrequest)
+  nic.wr_frame($01) ' htype
+  nic.wr_frame($06) ' hlen
+  nic.wr_frame(hops) ' hops
+
+  ' xid
+  nic.wr_frame_long(xid)
+  
+  nic.wr_frame_word(secs) ' secs
+
+  nic.wr_frame_pad(2) ' padding ('flags')
+
+  nic.wr_frame_data(ciaddr_ptr,4) 'ciaddr
+  nic.wr_frame_data(yiaddr_ptr,4) 'yiaddr
+  nic.wr_frame_data(siaddr_ptr,4) 'siaddr
+  nic.wr_frame_data(giaddr_ptr,4) 'giaddr
+
+  ' source mac address
+  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_pad(10) ' padding
+
+  nic.wr_frame_pad(64) ' sname (empty)
+
+  nic.wr_frame_pad(128) ' file (empty)
+
+PRI send_dhcp_request | i, pkt_len
   'term.str(string("Sending DHCP request",13))
   
   nic.start_frame
@@ -355,30 +359,7 @@ PRI send_bootp_request | i, pkt_len
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68,0)
 
-  nic.wr_frame($01) ' op (bootrequest)
-  nic.wr_frame($01) ' htype
-  nic.wr_frame($06) ' hlen
-  nic.wr_frame($00) ' hops
-
-  ' xid
-  nic.wr_frame_long(++pkt_id)
-
-  nic.wr_frame_word(long[RTCADDR]-ip_dhcp_expire) ' secs
-
-  nic.wr_frame_word($00) ' padding
-
-  nic.wr_frame_pad(4) 'ciaddr
-  nic.wr_frame_pad(4) 'yiaddr
-  nic.wr_frame_pad(4) 'siaddr
-  nic.wr_frame_pad(4) 'giaddr
-
-  ' source mac address
-  nic.wr_frame_data(@local_macaddr,6)
-  nic.wr_frame_pad(10)
-
-  nic.wr_frame_pad(64)
-
-  nic.wr_frame_pad(128)
+  compose_bootp(1,0,++pkt_id,long[RTCADDR]-ip_dhcp_expire,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -407,7 +388,7 @@ PRI send_bootp_request | i, pkt_len
   
   'UDP Checksum, but missing the pseudo ip appendage.
   'Not a problem, because in UDP the checksum is optional.
-  'nic.calc_checksum(ip_data, ip_data+pkt_len-20, UDP_cksum)
+  'nic.calc_frame_udp_checksum
   return nic.send_frame
 
   
@@ -418,31 +399,7 @@ PRI dhcp_offer_response | i, ptr
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68,0)
 
-  nic.wr_frame($01) ' op (bootrequest)
-  nic.wr_frame($01) ' htype
-  nic.wr_frame($06) ' hlen
-  nic.wr_frame(byte[pkt+DHCP_hops]) ' hops
-
-  ' xid
-  'nic.wr_frame_data(pkt+DHCP_xid,4)
-  nic.wr_frame_long(++pkt_id)
-  
-  nic.wr_frame_word(word[pkt+DHCP_secs]) ' secs
-
-  nic.wr_frame_pad(2) ' padding ('flags')
-
-  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'ciaddr
-  nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
-  nic.wr_frame_data(pkt+DHCP_siaddr,4) 'siaddr
-  nic.wr_frame_data(pkt+DHCP_giaddr,4) 'giaddr
-
-  ' source mac address
-  nic.wr_frame_data(@local_macaddr,6)
-  nic.wr_frame_pad(10) ' padding
-
-  nic.wr_frame_pad(64) ' sname (empty)
-
-  nic.wr_frame_pad(128) ' file (empty)
+  compose_bootp($01,byte[pkt+DHCP_hops],++pkt_id,word[pkt+DHCP_secs],pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -503,7 +460,7 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
-  if long[@ip_addr] == 0 or ip_dhcp_expire < long[RTCADDR]
+  if NOT has_valid_ip_addr
     if dstport == 68 AND srcport == 67
       if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
         ' this is a DHCP packet! We should send a request.
@@ -523,20 +480,19 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
           else   
             ptr++
 
-      'term.str(string("Got DHCP reply!",13))
-      ' Close all open TCP sockets.
-      'closeall()
-
       ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
       bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
       
       ' Hackity hack hack... This is a dirty assumption we are making here...
+      ' We only end up using this assumption if this is BOOTP and not DHCP,
+      ' so it isn't a big deal.
       if BYTE[pkt][DHCP_giaddr]
         bytemove(@ip_gateway, pkt+DHCP_giaddr, 4)
       else
         bytemove(@ip_gateway, pkt+ip_srcaddr, 4)
         
       ' Set this IP address to expire in an hour.
+      ' This will be overridden by DHCP option 51, if set
       ip_dhcp_expire := long[RTCADDR] + 3600
       
       if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
@@ -546,19 +502,14 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
             01 : bytemove(@ip_subnet,ptr+2,4)
             03 : bytemove(@ip_gateway,ptr+2,4)
             06 : bytemove(@ip_dns,ptr+2,4)
-            '23 : ' Default IP TTL
-            '28 : ' Broadcast address
-            '37 : ' Default TCP TTL
-            '42 : ' NTP Servers
+            23 : ' Default IP maxhops
+              bytemove(@ip_maxhops,ptr+2,2)
+              ip_maxhops := conv_endianlong(ip_maxhops)
             51 :
               bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
               ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
               ip_dhcp_expire>>=2
               ip_dhcp_expire+=long[RTCADDR]
-            '53 : ' DHCP message type
-            '  'if byte[ptr+2]==2
-            '    'TODO: This is a DHCP Offer. We need to send a formal DHCP request.
-            '    'dhcp_offer_response 
             '58 : ' DHCP renewal time
             '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
             '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
@@ -566,12 +517,14 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
             '  term.str(string("Renewal set to:"))
             '  term.dec(ip_dhcp_expire/(3600))
             '  term.out(13)
+            '28 : ' Broadcast address
+            '37 : ' Default TCP TTL
+            '42 : ' NTP Servers
           if byte[ptr]
             ptr++
             ptr+=byte[ptr]+1
           else   
             ptr++
-            
       
       settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
       settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
@@ -580,6 +533,7 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   else
     if dstport == 69
       ' TFTP!
+      ' To be implemented in the future.
       bounce_unreachable(3)
     else
       bounce_unreachable(3)
@@ -728,7 +682,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   bounce_unreachable(3)
 
-  srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
+  'srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -887,11 +841,11 @@ PRI arp_request_checkgateway(handle_addr) | ip_ptr
   ip_ptr := handle_addr + sSrcIp
   
   if (BYTE[ip_ptr] & ip_subnet[0]) == (ip_addr[0] & ip_subnet[0]) AND (BYTE[ip_ptr + 1] & ip_subnet[1]) == (ip_addr[1] & ip_subnet[1]) AND (BYTE[ip_ptr + 2] & ip_subnet[2]) == (ip_addr[2] & ip_subnet[2]) AND (BYTE[ip_ptr + 3] & ip_subnet[3]) == (ip_addr[3] & ip_subnet[3])   
-    arp_request(BYTE[ip_ptr], BYTE[ip_ptr + 1], BYTE[ip_ptr + 2], BYTE[ip_ptr + 3])
+    arp_request(ip_ptr)
     BYTE[handle_addr + sConState] := SCONNECTINGARP2
     LONG[handle_addr + sAge] := long[RTCADDR]
   else
-    arp_request(ip_gateway[0], ip_gateway[1], ip_gateway[2], ip_gateway[3])
+    arp_request(@ip_gateway)
     BYTE[handle_addr + sConState] := SCONNECTINGARP2G   
     LONG[handle_addr + sAge] := long[RTCADDR]
   

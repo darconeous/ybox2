@@ -293,24 +293,78 @@ PRI delay_ms(Duration)
   
 OBJ
   http          : "api_telnet_serial"
+  base64        : "base64"
 VAR
   byte httpMethod[8]
   byte httpPath[64]
   byte httpQuery[128]
   byte httpHeader[32]
-
+  byte buffer[128]
+  byte buffer2[128]
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
 CR_LF         BYTE      13,10,0
 HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
 HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
+HTTP_403      BYTE      "HTTP/1.1 403 Forbidden",13,10,0
+HTTP_401      BYTE      "HTTP/1.1 401 Authorization Required",13,10,0
 HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
 HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
 
-HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
+HTTP_HEADER_SEP     BYTE ": ",0
+HTTP_HEADER_CONTENT_TYPE BYTE "Content-Type",0
+HTTP_HEADER_LOCATION     BYTE "Location",0
+HTTP_HEADER_CONTENT_DISPOS     BYTE "Content-disposition",0
+HTTP_HEADER_CONTENT_LENGTH     BYTE "Content-Length",0
+
+HTTP_CONTENT_TYPE_HTML  BYTE "text/html; charset=utf-8",0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
-pub httpServer | char, i, lineLength,contentSize
+
+pri httpParseRequest(method,path,query) | i,char
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
+      BYTE[method][i]:=char
+      if char == " "
+        quit
+      i++
+    BYTE[method][i]:=0
+    i:=0
+    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      BYTE[path][i]:=char
+      if char == " " OR char == "?"  OR char == "#"
+        quit
+      i++
+
+    if BYTE[path][i]=="?"
+      ' If we stopped on a question mark, then grab the query
+      BYTE[path][i]:=0
+      i:=0
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+        BYTE[query][i]:=char
+        if char == " " OR char == "#" OR char == 13
+          quit
+        i++        
+      BYTE[query][i]:=0
+    else
+      BYTE[path][i]:=0
+      BYTE[query][0]:=0
+
+pri httpUnauthorized
+  http.str(@HTTP_401)
+  http.str(@HTTP_CONNECTION_CLOSE)
+  http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  http.str(@CR_LF)
+  http.str(@HTTP_401)
+
+pri httpNotFound
+  http.str(@HTTP_404)
+  http.str(@HTTP_CONNECTION_CLOSE)
+  http.str(@CR_LF)
+  http.str(@HTTP_404)
+
+
+pub httpServer | char, i, lineLength,contentSize,authorized
 
   repeat
     repeat while \http.listen(80) == -1
@@ -326,56 +380,51 @@ pub httpServer | char, i, lineLength,contentSize
       http.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
-    i:=0
 
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      httpMethod[i]:=char
-      if httpMethod[i] == " "
-        quit
-      i++
-    httpMethod[i]:=0
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-      httpPath[i]:=char
-      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
-        quit
-      i++
 
-    httpQuery[0]:=0
-    if httpPath[i]=="?"
-      ' If we stopped on a question mark, then grab the query
-      httpPath[i]:=0
-      i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<127
-        httpQuery[i]:=char
-        if httpQuery[i] == " " OR httpPath[i] == "#"
-          quit
-        i++        
-    else
-      httpPath[i]:=0
-    httpQuery[i]:=0
-  
+    httpParseRequest(@httpMethod,@httpPath,@httpQuery)
+
+
+    ' If there isn't a password set, then we are by default "authorized"
+    authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
+    
     lineLength:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
       if (char == 13)
+        char:=http.rxtime(1000)
+      if (char == 10)
         ifnot lineLength
           quit
         lineLength:=0
       else
-        if (char <> 10)
-          if lineLength<31
-            httpHeader[lineLength]:=char
-            if char == ":"
-              httpHeader[lineLength]:=0
-              if strcomp(@httpHeader,string("Content-Length"))
-                contentSize := http.readDec
-                lineLength:=1
-          lineLength++
+        if lineLength<31
+          httpHeader[lineLength++]:=char
+          if char == ":"
+            httpHeader[lineLength-1]:=0
+            if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
+              contentSize := http.readDec
+            elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+              http.rxtime(1000)
+              repeat i from 0 to 7 ' Skip the 'Basic' part
+                if http.rxtime(1000) == " " OR http.isEOF
+                  quit
+              i:=0
+              repeat while i<127 AND ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
+                buffer[i++]:=char
+                if (char == 13)
+                  quit
+              if i
+                buffer[i]:=0
+                base64.inplaceDecode(@buffer)  
+                settings.getString(settings#MISC_PASSWORD,@buffer2,127)
+                authorized:=strcomp(@buffer,@buffer2)
+            httpHeader[0]:=0
+
              
     if strcomp(@httpMethod,string("GET"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
+        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("<html><head><title>ybox2</title></head><body><h1>"))
@@ -453,12 +502,18 @@ pub httpServer | char, i, lineLength,contentSize
         http.str(string("</body></html>",13,10))
         
       elseif strcomp(@httpPath,string("/config"))
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("NOT YET IMPLEMENTED",13,10))
 
       elseif strcomp(@httpPath,string("/reboot"))
+        ifnot authorized
+          httpUnauthorized
+          next
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)

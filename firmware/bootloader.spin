@@ -70,7 +70,7 @@ PUB init | i
   else
     stage_two := FALSE
 
-  if settings.findKey(settings#MISC_AUTOBOOT)
+  if NOT stage_two AND settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
     if NOT ina[subsys#BTTNPin]
       boot_stage2
@@ -433,11 +433,13 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
 
         http.str(string("<div><tt>Autoboot: "))
         if settings.findKey(settings#MISC_AUTOBOOT)  
-          http.str(string("<b>ON</b> :"))
-          httpOutputLink(string("/autoboot?0"),string("disable"))
+          http.str(string("<b>ON</b> "))
+          if authorized
+            httpOutputLink(string("/autoboot?0"),string("disable"))
         else
           http.str(string("<b>OFF</b> "))
-          httpOutputLink(string("/autoboot?1"),string("enable"))
+          if authorized
+            httpOutputLink(string("/autoboot?1"),string("enable"))
         http.str(string("</tt></div>"))
 
         http.str(string("<div><tt>Password: "))
