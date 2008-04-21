@@ -11,12 +11,17 @@ PUB inplaceDecode(in_ptr) | out_ptr,i,in,char,size
   out_ptr:=in_ptr
   size:=0
   repeat
+    ifnot BYTE[in_ptr]
+      quit
     repeat i from 0 to 3
-      repeat while (char:=BYTE[in_ptr++])==" "
+      char:=BYTE[in_ptr++]
+      'repeat while (char:=BYTE[in_ptr++])==" "
       ifnot char
         BYTE[@in][i]:="="
+        in_ptr--
         quit
-      BYTE[@in][i]:=char
+      else
+        BYTE[@in][i]:=char
      
     i:=base64_decode_4(@in,out_ptr)
     out_ptr+=i
@@ -41,7 +46,7 @@ PRI base64_decode_4(inptr,outptr) | retVal,i,out
       case i
         3: retVal:=2
         2: retVal:=1
-        1: abort -1
+        1: retVal:=0
         0: retVal:=0
       quit
     out|=\base64_tlu(BYTE[inptr][i])<<((3-i)*6)

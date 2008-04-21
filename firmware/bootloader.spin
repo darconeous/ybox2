@@ -164,6 +164,7 @@ PUB init | i
     subsys.StatusIdle
 
   'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
+  'settings.removeKey(settings#MISC_PASSWORD)  
       
   httpServer
   
@@ -323,6 +324,8 @@ pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
       
 
   return 0
+           
+
      
 pub httpServer | char, i,j, lineLength,contentSize,authorized
   webCog:=cogid+1
@@ -350,23 +353,22 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
     lineLength:=0
     repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
       if (char == 13)
-        http.rxtime(1000)
+        char:=http.rxtime(1000)
+      if (char == 10)
         ifnot lineLength
           quit
         lineLength:=0
       else
-        if (char <> 10)
-          if lineLength<31
-            httpHeader[lineLength]:=char
+        if lineLength<31
+          httpHeader[lineLength++]:=char
           if char == ":"
-            httpHeader[lineLength]:=0
+            httpHeader[lineLength-1]:=0
             if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
               contentSize := http.readDec
-              lineLength:=1
             elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-              http.rx
-              repeat 7 ' Skip the 'Basic' part
-                if http.rxtime(1000) == " "
+              http.rxtime(1000)
+              repeat i from 0 to 7 ' Skip the 'Basic' part
+                if http.rxtime(1000) == " " OR http.isEOF
                   quit
               i:=0
               repeat while i<127 AND ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
@@ -378,8 +380,7 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
                 base64.inplaceDecode(@buffer)  
                 settings.getString(settings#MISC_PASSWORD,@buffer2,127)
                 authorized:=strcomp(@buffer,@buffer2)
-              
-          lineLength++
+            httpHeader[0]:=0
 
     ' Authorization check
     ' You can comment this out if you want to
@@ -507,17 +508,14 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
           else
             j:=httpGetField(@buffer,string("pwd2"),@httpQuery,63)
           if j==0 OR NOT strcomp(@httpQuery,@buffer2+i)
-             i:=0
-
+            i:=0
+         
         ifnot i
           http.str(string("HTTP/1.1 400 Bad Request",13,10))
           http.str(@HTTP_CONNECTION_CLOSE)
           http.str(@CR_LF)
           http.str(string("Passwords didn't match.",13,10))
         else
-          term.str(@buffer2)
-          term.out(13)
-
           settings.removeKey($1010)
           settings.setString(settings#MISC_PASSWORD,@buffer2)  
           settings.commit
