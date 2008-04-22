@@ -68,18 +68,16 @@ PUB irTest
 PRI irTestCycle
   LED_R:=0
   LED_G:=0
-  LED_B:=0
+  LED_B:=255
   repeat
-    'waitcnt(8000_000 + cnt)
     waitpeq(FALSE,1<<15,0)
     LED_R:=255
     LED_G:=255
-    LED_B:=255
-    'waitcnt(8000_000 + cnt)
+    LED_B:=0
     waitpne(FALSE,1<<15,0)
     LED_R:=0
     LED_G:=0
-    LED_B:=0
+    LED_B:=255
 
 PUB StatusIdle
   StatusOff
