@@ -29,7 +29,6 @@ CON
   _xinfreq = 5_000_000                                                      
   version = 1.3
   apiversion = 3
-  EEPROMPageSize = 128
   RTCADDR = $7A00
 
 DAT
@@ -49,12 +48,6 @@ DAT
         any_ipaddr    long    $00000000
         bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
 
-' DHCP Vars
-        ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
-        ip_dhcp_expire  long    0                   ' DHCP expiration
-        ip_dhcp_xid     long    0
-        ip_dhcp_server  byte    0,0,0,0
-        
 OBJ
   nic : "driver_enc28j60"
   random   : "RealRandom"
@@ -103,62 +96,45 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
   settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
   settings.getData(settings#NET_IPv4_DNS,@ip_dns,4)
-   
-  ' If DHCP is disabled, set the expire time to be way in the future. 
-  if settings.findKey(settings#NET_DHCPv4_DISABLE)
-    long[ip_dhcp_expire]:=$7FFFFFFF
-  else
-    settings.removeKey(settings#NET_IPv4_ADDR)
-    settings.removeKey(settings#NET_IPv4_MASK)
-    settings.removeKey(settings#NET_IPv4_GATE)
+
+  dhcp_init
 
   cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
   return cog
-  
+    
 PUB stop
 '' Stop the driver
   if cog
     cogstop(cog~ - 1)           ' stop the tcp engine
   nic.stop                    ' stop nic driver (kills spi engine)
 
-PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, dhcp_delay
+PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
   ' Start the ENC28J60 driver in a new cog
   nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic
     
   pkt := nic.get_packetpointer
 
-  if NOT has_valid_ip_addr
-    send_dhcp_request
+  dhcp_process
     
   i := 0
-  dhcp_delay := 5000 + 255 - (randseed? >> 23)
 
   nic.banksel(nic#EPKTCNT)      ' select packet count bank
   repeat
-
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
     if pkt_count > 0
       service_packet            ' handle packet
-      nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
+    dhcp_process
     ++i
-    if NOT has_valid_ip_addr
-      if i > dhcp_delay
-        send_dhcp_request
-        i := 0
-        nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
-        if dhcp_delay < 5000*32
-          dhcp_delay *= 2 ' Double the delay time. Exponential back-off.
-          dhcp_delay += 255-(randseed? >> 23) ' Add some randomness
-    elseif i > 2
+    
+    if has_valid_ip_addr AND i > 2
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
-      nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
+    nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
 PRI service_packet
-
   ' lets process this frame
   nic.get_frame
 
@@ -169,7 +145,6 @@ PRI service_packet
         case BYTE[pkt][constant(arp_op + 1)]
           $01 : handle_arp
           $02 : handle_arpreply
-        '++count_arp
   elseif NOT has_valid_ip_addr
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00 AND BYTE[pkt][ip_proto] == PROT_UDP
       handle_udp 
@@ -182,8 +157,6 @@ PRI service_packet
        
 PRI compare_ipaddr(ip1ptr,ip2ptr)
   return BYTE[ip1ptr][0] == BYTE[ip2ptr][0] AND BYTE[ip1ptr][1] == BYTE[ip2ptr][1] AND BYTE[ip1ptr][2] == BYTE[ip2ptr][2] AND BYTE[ip1ptr][3] == BYTE[ip2ptr][3]
-PRI has_valid_ip_addr
-  return long[@ip_addr] AND ip_dhcp_expire > long[RTCADDR]
 
 ' *******************************
 ' ** Protocol Receive Handlers **
@@ -278,6 +251,7 @@ PRI handle_arpreply | handle, handle_addr, ip, found
 PRI bounce_unreachable(code) | i
   ifnot compare_ipaddr(pkt+ip_destaddr,@ip_addr)
     ' Don't bounce unless it was specifically for us
+    ' In other words, don't bounce broadcasts
     return
 
   nic.start_frame
@@ -331,230 +305,17 @@ PRI handle_icmp | i,pkt_len
         ' send the packet
         nic.send_frame
 
-PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
-  nic.wr_frame(op) ' op (bootrequest)
-  nic.wr_frame($01) ' htype
-  nic.wr_frame($06) ' hlen
-  nic.wr_frame(hops) ' hops
-
-  ' xid
-  nic.wr_frame_long(xid)
-  
-  nic.wr_frame_word(secs) ' secs
-
-  nic.wr_frame_pad(2) ' padding ('flags')
-
-  nic.wr_frame_data(ciaddr_ptr,4) 'ciaddr
-  nic.wr_frame_data(yiaddr_ptr,4) 'yiaddr
-  nic.wr_frame_data(siaddr_ptr,4) 'siaddr
-  nic.wr_frame_data(giaddr_ptr,4) 'giaddr
-
-  ' source mac address
-  nic.wr_frame_data(@local_macaddr,6)
-  nic.wr_frame_pad(10) ' padding
-
-  nic.wr_frame_pad(64) ' sname (empty)
-
-  nic.wr_frame_pad(128) ' file (empty)
-
-PRI send_dhcp_request | i, pkt_len
-  'term.str(string("Sending DHCP request",13))
-  
-  nic.start_frame
-
-  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
-  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68,0)
-
-  ip_dhcp_xid := ++pkt_id
-  
-  compose_bootp(1,0,ip_dhcp_xid,long[RTCADDR]-ip_dhcp_expire,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
-  
-  ' DHCP Magic Cookie
-  nic.wr_frame($63)
-  nic.wr_frame($82)
-  nic.wr_frame($53)
-  nic.wr_frame($63)
-
-  ' DHCP Message Type
-  nic.wr_frame(53)
-  nic.wr_frame($01)
-  nic.wr_frame($01)
-
-  ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
-  nic.wr_frame_data(@local_macaddr,6)
-
-  ' End of vendor data
-  nic.wr_frame($FF)
-
-  nic.wr_frame_pad(46)
-
-  nic.calc_frame_udp_length
-  nic.calc_frame_ip_checksum
-  
-  'UDP Checksum, but missing the pseudo ip appendage.
-  'Not a problem, because in UDP the checksum is optional.
-  'nic.calc_frame_udp_checksum
-  return nic.send_frame
-
-  
-PRI dhcp_offer_response | i, ptr         
-  nic.start_frame
-
-  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
-  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68,0)
-
-  ip_dhcp_xid := ++pkt_id
-  
-  compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,word[pkt+DHCP_secs],pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
-  
-  ' DHCP Magic Cookie
-  nic.wr_frame($63)
-  nic.wr_frame($82)
-  nic.wr_frame($53)
-  nic.wr_frame($63)
-
-  ' DHCP Message Type
-  nic.wr_frame(53)
-  nic.wr_frame($01)
-  nic.wr_frame($03)
-
-  ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
-  nic.wr_frame_data(@local_macaddr,6)
-
-  if long[pkt+DHCP_yiaddr]
-    nic.wr_frame(50)
-    nic.wr_frame($04)
-    nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
-  elseif long[pkt+DHCP_ciaddr]
-    nic.wr_frame(50)
-    nic.wr_frame($04)
-    nic.wr_frame_data(pkt+DHCP_ciaddr,4) 'ciaddr
-
-  ptr:=pkt+DHCP_Options+4
-  repeat while byte[ptr]<>$FF
-    case byte[ptr]
-      54 : ' DHCP server id
-        nic.wr_frame(54)
-        nic.wr_frame(byte[ptr+1])
-        nic.wr_frame_data((ptr+2),byte[ptr+1])
-    if byte[ptr]
-      ptr++
-      ptr+=byte[ptr]+1
-    else   
-      ptr++
-
-  ' End of vendor data
-  nic.wr_frame($FF)
-
-  nic.wr_frame_pad(35) ' Padding
-
-  nic.calc_frame_udp_length
-  nic.calc_frame_ip_checksum
-  
-  'UDP Checksum, which is optional. Leaving it out because it isn't finished.
-  'nic.calc_frame_udp_checksum
-
-  return nic.send_frame
    
-PRI handle_udp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
+  
+PRI handle_udp | dstport
   ' Handles incoming UDP packets
 
-  'srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
-  srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
-  if NOT has_valid_ip_addr
-    if dstport == 68 AND srcport == 67
-      xid := BYTE[pkt][DHCP_xid] << 24 + BYTE[pkt][constant(DHCP_xid + 1)] << 16 + BYTE[pkt][constant(DHCP_xid + 2)] << 8 + BYTE[pkt][constant(DHCP_xid + 3)]
-      if xid<>ip_dhcp_xid
-        ' Transaction ID doesn't match. Ignore this packet.
-        return
-
-      if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
-        ' this is a DHCP packet! We should send a request.
-        ptr:=pkt+DHCP_Options+4
-        repeat while byte[ptr]<>$FF
-          case byte[ptr]
-            53 : ' DHCP message type
-              if byte[ptr+2]==2
-                dhcp_offer_response
-                return
-              if byte[ptr+2]<>5
-                ' If this isn't an ACK, then ignore it.
-                'return
-          if byte[ptr]
-            ptr++
-            ptr+=byte[ptr]+1
-          else   
-            ptr++
-
-      ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
-      bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
-      
-      ' Hackity hack hack... This is a dirty assumption we are making here...
-      ' We only end up using this assumption if this is BOOTP and not DHCP,
-      ' so it isn't a big deal.
-      if BYTE[pkt][DHCP_giaddr]
-        bytemove(@ip_gateway, pkt+DHCP_giaddr, 4)
-      else
-        bytemove(@ip_gateway, pkt+ip_srcaddr, 4)
-        
-      ' Set this IP address to expire in an hour.
-      ' This will be overridden by DHCP option 51, if set
-      ip_dhcp_expire := long[RTCADDR] + 3600
-      
-      if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
-        ptr:=pkt+DHCP_Options+4
-        repeat while byte[ptr]<>$FF
-          case byte[ptr]
-            01 : bytemove(@ip_subnet,ptr+2,4)
-            03 : bytemove(@ip_gateway,ptr+2,4)
-            06 : bytemove(@ip_dns,ptr+2,4)
-            54 : bytemove(@ip_dhcp_server,ptr+2,4)
-            23 : ' Default IP maxhops
-              bytemove(@ip_maxhops,ptr+2,2)
-              ip_maxhops := conv_endianlong(ip_maxhops)
-            51 :
-              bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
-              ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
-              ip_dhcp_expire>>=2
-              ip_dhcp_expire+=long[RTCADDR]
-            '58 : ' DHCP renewal time
-            '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
-            '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
-            '  ip_dhcp_expire+=long[RTCADDR]
-            '  term.str(string("Renewal set to:"))
-            '  term.dec(ip_dhcp_expire/(3600))
-            '  term.out(13)
-            '28 : ' Broadcast address
-            '37 : ' Default TCP TTL
-            '42 : ' NTP Servers
-          if byte[ptr]
-            ptr++
-            ptr+=byte[ptr]+1
-          else   
-            ptr++
-      
-      settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
-      settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
-      settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
-      settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
-  else
-    if dstport == 69
-      ' TFTP!
-      ' To be implemented in the future.
-      bounce_unreachable(3)
-    else
-      bounce_unreachable(3)
-          
+  case dstport
+    68: handle_dhcp
+    '69: handle_tftp
+    other: bounce_unreachable(3)
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
   ' Handles incoming TCP packets
@@ -1269,6 +1030,29 @@ CON
   UDP_len = UDP_destport+2
   UDP_cksum = UDP_len+2
   UDP_data = UDP_cksum+2
+
+
+
+
+DAT
+' ================================================================
+' DHCP Implementation
+' ================================================================
+DAT
+' DHCP Vars
+        ip_dhcp_server_ip  byte    0,0,0,0
+        ip_dhcp_server_mac byte    $FF, $FF, $FF, $FF, $FF, $FF
+        ip_dhcp_state   byte    0
+        ip_dhcp_xid     long    0
+        ip_dhcp_next    long    0                   ' Time for next DHCP op
+        ip_dhcp_delay   word    0
+CON
+  DHCP_STATE_UNBOUND = 0       
+  DHCP_STATE_RENEW = 1       
+  DHCP_STATE_REBINDING = 2       
+  DHCP_STATE_BOUND = 3       
+  DHCP_STATE_DISABLED = 4       
+
   '******************************************************************
   '*      DHCP Message
   '******************************************************************
@@ -1288,3 +1072,258 @@ CON
   DHCP_file = DHCP_sname+64
   DHCP_options = DHCP_file+128
   DHCP_message_end = DHCP_options+312
+PRI dhcp_init
+  if settings.findKey(settings#NET_DHCPv4_DISABLE)
+    ip_dhcp_state:=DHCP_STATE_DISABLED
+  else
+    ip_dhcp_next:=LONG[RTCADDR]
+    ip_dhcp_state:=DHCP_STATE_UNBOUND
+    settings.removeKey(settings#NET_IPv4_ADDR)
+    settings.removeKey(settings#NET_IPv4_MASK)
+    settings.removeKey(settings#NET_IPv4_GATE)
+pub dhcp_rebind
+  if ip_dhcp_state<>DHCP_STATE_DISABLED
+    ip_dhcp_state:=DHCP_STATE_UNBOUND
+    ip_dhcp_delay:=0       
+    ip_dhcp_next:=0
+PRI dhcp_process
+'' Called by the main network loop periodicly
+  if ip_dhcp_state<>DHCP_STATE_DISABLED AND LONG[RTCADDR] => ip_dhcp_next
+    case ip_dhcp_state
+      DHCP_STATE_UNBOUND:
+        send_dhcp_request
+        if ip_dhcp_delay<33
+          ip_dhcp_delay++
+          ip_dhcp_delay*=2
+        ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
+      DHCP_STATE_BOUND:
+        dhcp_rebind
+      other:
+        dhcp_rebind
+   
+PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
+  nic.wr_frame(op) ' op (bootrequest)
+  nic.wr_frame($01) ' htype
+  nic.wr_frame($06) ' hlen
+  nic.wr_frame(hops) ' hops
+
+  ' xid
+  nic.wr_frame_long(xid)
+  
+  nic.wr_frame_word(secs) ' secs
+
+  nic.wr_frame_pad(2) ' padding ('flags')
+
+  nic.wr_frame_data(ciaddr_ptr,4) 'ciaddr
+  nic.wr_frame_data(yiaddr_ptr,4) 'yiaddr
+  nic.wr_frame_data(siaddr_ptr,4) 'siaddr
+  nic.wr_frame_data(giaddr_ptr,4) 'giaddr
+
+  ' source mac address
+  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_pad(10) ' padding
+
+  nic.wr_frame_pad(64) ' sname (empty)
+
+  nic.wr_frame_pad(128) ' file (empty)
+
+PRI send_dhcp_request | i, pkt_len
+  'term.str(string("Sending DHCP request",13))
+  
+  nic.start_frame
+
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
+  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
+  compose_udp_header(67,68,0)
+
+  ip_dhcp_xid := randseed?
+  
+  compose_bootp(1,0,ip_dhcp_xid,ip_dhcp_delay,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
+  
+  ' DHCP Magic Cookie
+  nic.wr_frame($63)
+  nic.wr_frame($82)
+  nic.wr_frame($53)
+  nic.wr_frame($63)
+
+  ' DHCP Message Type
+  nic.wr_frame(53)
+  nic.wr_frame($01)
+  nic.wr_frame($01)
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  nic.wr_frame_data(@local_macaddr,6)
+
+  ' End of vendor data
+  nic.wr_frame($FF)
+
+  nic.wr_frame_pad(46)
+
+  nic.calc_frame_udp_length
+  nic.calc_frame_ip_checksum
+  
+  'UDP Checksum, but missing the pseudo ip appendage.
+  'Not a problem, because in UDP the checksum is optional.
+  'nic.calc_frame_udp_checksum
+  return nic.send_frame
+
+  
+PRI dhcp_offer_response | i, ptr         
+  nic.start_frame
+
+  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
+  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
+  compose_udp_header(67,68,0)
+
+  ip_dhcp_xid := randseed?
+  
+  compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,word[pkt+DHCP_secs],pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
+  
+  ' DHCP Magic Cookie
+  nic.wr_frame($63)
+  nic.wr_frame($82)
+  nic.wr_frame($53)
+  nic.wr_frame($63)
+
+  ' DHCP Message Type
+  nic.wr_frame(53)
+  nic.wr_frame($01)
+  nic.wr_frame($03)
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  nic.wr_frame_data(@local_macaddr,6)
+
+  if long[pkt+DHCP_yiaddr]
+    nic.wr_frame(50)
+    nic.wr_frame($04)
+    nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
+  elseif long[pkt+DHCP_ciaddr]
+    nic.wr_frame(50)
+    nic.wr_frame($04)
+    nic.wr_frame_data(pkt+DHCP_ciaddr,4) 'ciaddr
+
+  ptr:=pkt+DHCP_Options+4
+  repeat while byte[ptr]<>$FF
+    case byte[ptr]
+      54 : ' DHCP server id
+        nic.wr_frame(54)
+        nic.wr_frame(byte[ptr+1])
+        nic.wr_frame_data((ptr+2),byte[ptr+1])
+    if byte[ptr]
+      ptr++
+      ptr+=byte[ptr]+1
+    else   
+      ptr++
+
+  ' End of vendor data
+  nic.wr_frame($FF)
+
+  nic.wr_frame_pad(35) ' Padding
+
+  nic.calc_frame_udp_length
+  nic.calc_frame_ip_checksum
+  
+  'UDP Checksum, which is optional. Leaving it out because it isn't finished.
+  'nic.calc_frame_udp_checksum
+
+  return nic.send_frame
+
+PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
+
+  srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
+
+  if srcport <> 67
+    ' If the sender isn't sending on the DHCP server port
+    ' then we shouldn't be listening.
+    return
+    
+  if ip_dhcp_state<>DHCP_STATE_UNBOUND
+    return
+    
+  xid := BYTE[pkt][DHCP_xid] << 24 + BYTE[pkt][constant(DHCP_xid + 1)] << 16 + BYTE[pkt][constant(DHCP_xid + 2)] << 8 + BYTE[pkt][constant(DHCP_xid + 3)]
+
+  if xid<>ip_dhcp_xid
+    ' Transaction ID doesn't match. Ignore this packet.
+    return
+   
+  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+    ' this is a DHCP packet! We should send a request.
+    ptr:=pkt+DHCP_Options+4
+    repeat while byte[ptr]<>$FF
+      case byte[ptr]
+        53 : ' DHCP message type
+          if byte[ptr+2]==2
+            dhcp_offer_response
+            return
+          if byte[ptr+2]<>5
+            ' If this isn't an ACK, then ignore it.
+            'return
+      if byte[ptr]
+        ptr++
+        ptr+=byte[ptr]+1
+      else   
+        ptr++
+   
+  ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
+  bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
+   
+  ' Hackity hack hack... This is a dirty assumption we are making here...
+  ' We only end up using this assumption if this is BOOTP and not DHCP,
+  ' so it isn't a big deal.
+  if BYTE[pkt][DHCP_giaddr]
+    bytemove(@ip_gateway, pkt+DHCP_giaddr, 4)
+  else
+    bytemove(@ip_gateway, pkt+ip_srcaddr, 4)
+    
+  ' Set this IP address to expire in an hour.
+  ' This will be overridden by DHCP option 51, if set
+  ip_dhcp_next := long[RTCADDR] + 3600
+   
+  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+    ptr:=pkt+DHCP_Options+4
+    repeat while byte[ptr]<>$FF
+      case byte[ptr]
+        01 : bytemove(@ip_subnet,ptr+2,4)
+        03 : bytemove(@ip_gateway,ptr+2,4)
+        06 : bytemove(@ip_dns,ptr+2,4)
+        54 : bytemove(@ip_dhcp_server_ip,ptr+2,4)
+        23 : ' Default IP maxhops
+          bytemove(@ip_maxhops,ptr+2,2)
+          ip_maxhops := conv_endianlong(ip_maxhops)
+        51 :
+          bytemove(@ip_dhcp_next,ptr+2,4) ' lease time
+          ip_dhcp_next := conv_endianlong(ip_dhcp_next)
+          ip_dhcp_next>>=2
+          ip_dhcp_next+=long[RTCADDR]
+        '58 : ' DHCP renewal time
+        '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
+        '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
+        '  ip_dhcp_expire+=long[RTCADDR]
+        '  term.str(string("Renewal set to:"))
+        '  term.dec(ip_dhcp_expire/(3600))
+        '  term.out(13)
+        '28 : ' Broadcast address
+        '37 : ' Default TCP TTL
+        '42 : ' NTP Servers
+      if byte[ptr]
+        ptr++
+        ptr+=byte[ptr]+1
+      else   
+        ptr++
+
+  ip_dhcp_state:=DHCP_STATE_BOUND
+  bytemove(@ip_dhcp_server_mac, pkt+enetpacketSrc0, 6)
+   
+  settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
+  settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
+  settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
+  settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
+
+PRI has_valid_ip_addr
+  return long[@ip_addr]

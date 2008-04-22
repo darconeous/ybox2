@@ -550,8 +550,11 @@ pub httpServer | char, i, lineLength,contentSize,authorized
           repeat i from 10 to 15
             http.hex(byte[@httpQuery][i],2)
           http.str(string("</tt></div>"))
-        http.str(string("<div><tt>RTC: "))
-        http.dec(subsys.RTC)
+        http.str(string("<div><tt>Uptime: "))
+        http.dec(subsys.RTC/60)
+        http.tx("m")
+        http.dec(subsys.RTC//60)
+        http.tx("s")
         http.str(string("</tt></div>"))
         http.str(string("<div><tt>Refreshes: "))
         http.dec(stat_refreshes)

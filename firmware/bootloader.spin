@@ -180,6 +180,8 @@ PRI boot_stage2 | i
 PRI initial_configuration | i
   term.str(string("First boot!",13))
 
+  settings.purge
+  
   random.start
 
   ' Make a random UUID
@@ -214,7 +216,7 @@ PRI initial_configuration | i
 
   ' RGB LED Configuration
   ' Original board = $000A0B09
-  ' Adafruit board = $01090A0B
+  ' Adafruit board = $01090A0B (This is the default)
   'settings.setLong(settings#MISC_LED_CONF,$01090A0B)
   'settings.setLong(settings#MISC_LED_CONF,$000A0B09)
 
