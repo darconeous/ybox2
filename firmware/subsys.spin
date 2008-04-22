@@ -61,6 +61,25 @@ PUB StatusOff
   if modecog
     cogstop(modecog~ - 1)
     modecog:=0
+PUB irTest
+  StatusOff
+  modecog := cognew(irTestCycle, @stack) + 1 
+
+PRI irTestCycle
+  LED_R:=0
+  LED_G:=0
+  LED_B:=0
+  repeat
+    'waitcnt(8000_000 + cnt)
+    waitpeq(FALSE,1<<15,0)
+    LED_R:=255
+    LED_G:=255
+    LED_B:=255
+    'waitcnt(8000_000 + cnt)
+    waitpne(FALSE,1<<15,0)
+    LED_R:=0
+    LED_G:=0
+    LED_B:=0
 
 PUB StatusIdle
   StatusOff

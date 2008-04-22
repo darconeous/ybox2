@@ -31,8 +31,9 @@ VAR
   long stack[80] 
   byte stage_two
 DAT
-productName   BYTE      "ybox2 bootloader v0.5",0      
+productName   BYTE      "ybox2 bootloader v0.9",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
+productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
 PUB init | i
   'cognew(@bootstage2,0)
@@ -52,6 +53,8 @@ PUB init | i
   term.str(@productName)
   term.out(13)
   term.str(@productURL)
+  term.out(13)
+  term.str(@productURL2)
   term.out(13)
   term.out($0c)
   term.out(2)
@@ -223,6 +226,7 @@ PRI initial_configuration | i
   settings.commit
   return TRUE
 
+    
   
 VAR
   byte buffer [128]
@@ -494,6 +498,8 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         httpOutputLink(string("/reboot"),string("Reboot"))
         http.tx(" ")
         httpOutputLink(string("/stage2"),string("Boot stage 2"))
+        http.tx(" ")
+        httpOutputLink(string("/irtest"),string("IR Test Mode"))
         ifnot authorized
           http.tx(" ")
           httpOutputLink(string("/login"),string("Login"))
@@ -512,6 +518,9 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(string("<h2>Other</h2>"))
         http.str(string("<div>"))
         httpOutputLink(@productURL,@productURL)
+        http.str(string("</div>"))
+        http.str(string("<div>"))
+        httpOutputLink(@productURL2,@productURL2)
         http.str(string("</div>"))
         http.str(string("</body></html>",13,10))
         
@@ -559,6 +568,13 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(string("REBOOTING",13,10))
         http.close
         reboot
+      elseif strcomp(@httpPath,string("/irtest"))
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        subsys.irTest
+        http.str(string("Status LED should now blink on IR activity.",13,10))
+        http.close
       elseif strcomp(@httpPath,string("/stage2"))
         http.str(@HTTP_200)
         http.str(@HTTP_CONNECTION_CLOSE)
