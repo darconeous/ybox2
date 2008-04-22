@@ -120,13 +120,7 @@ PUB init | i
     if ina[subsys#BTTNPin]
       term.str(string("RESET MODE",13))
       SadChirp
-      settings.removeKey(settings#MISC_PASSWORD)  
-      settings.removeKey(settings#MISC_AUTOBOOT)
-      settings.removeKey(settings#NET_DHCPv4_DISABLE)
-      settings.removeKey(settings#MISC_SOUND_DISABLE)
-      settings.removeKey($1010)
-      settings.removeKey(settings#MISC_STAGE_TWO)
-      settings.commit
+      resetSettings
       HappyChirp
       reboot
 
@@ -166,11 +160,25 @@ PUB init | i
   else
     subsys.StatusIdle
 
-  'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
-  'settings.removeKey(settings#MISC_PASSWORD)  
-      
   repeat
     \httpServer
+PRI resetSettings | key, nextKey
+'' Preforms a "factory reset" by removing all
+'' settings except those used for device identification
+'' and hardware configuration.
+  key:=settings.firstKey
+  ifnot key
+    return
+  repeat
+    nextKey:=settings.nextKey(key)
+    case key
+      settings#NET_MAC_ADDR:   ' Preserve MAC Address
+      settings#MISC_UUID:      ' Preserve UUID
+      settings#MISC_LED_CONF:  ' Preserve LED Configuration
+      other: settings.removeKey(key)
+  while (key:=nextKey)
+
+  settings.commit
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)

@@ -16,6 +16,19 @@
         1 Byte                  Check Byte (Ones complement of key length)
         x Bytes                 Data
         1 Byte (Optional)       Padding, if size is odd
+
+        The data is filled in from back to front, so that the
+        size of settings area can be adjusted later without
+        causing problems. This means that the actual order
+        of things in memory is reverse of what you see above.
+
+        Even though it is written stored from the top-down, the
+        data is stored in its original order. In other words,
+        the actual data contained in a variable isn't stored
+        backward. Doing so would have made things more complicated
+        without any obvious benefit.
+
+        Currently requires a 64KB EEPROM to save things persistantly.
 }} 
 CON
 
@@ -103,6 +116,21 @@ PUB findKey(key) | retVal
   retVal:=findKey_(key)
   unlock
   return retVal
+PUB firstKey
+  if word[SettingsTop] AND (byte[SettingsTop-2]==(byte[SettingsTop-3]^$FF))
+    return word[SettingsTop]
+  return 0
+
+PUB nextKey(key) | iter
+  lock
+  iter:=findKey_(key)
+  iter-=4+((byte[iter-2]+1) & !1)
+  if (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+    key:=word[iter]
+  else
+    key:=0
+  unlock
+  return key
 PUB getData(key,ptr,size_) | iter
   lock
   iter := findKey_(key)
@@ -115,13 +143,13 @@ PUB getData(key,ptr,size_) | iter
     size_:=0
   unlock
   return size_
-PUB removeKey(key) | iter, nextKey
+PUB removeKey(key) | iter, nxtKey
   lock
   iter := findKey_(key)
   if iter
 '    nextKey := iter-  3-byte[iter-2]
-    nextKey := iter-  (4+((byte[iter-2]+1) & !1))
-    bytemove(SettingsBottom+iter-nextKey,SettingsBottom, nextKey-SettingsBottom+1)
+    nxtKey := iter-  (4+((byte[iter-2]+1) & !1))
+    bytemove(SettingsBottom+iter-nxtKey,SettingsBottom, nxtKey-SettingsBottom+1)
   unlock
   return iter
 PUB setData(key,ptr,size_) | iter
