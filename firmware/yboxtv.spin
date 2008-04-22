@@ -22,16 +22,24 @@ OBJ
   settings      : "settings"
                                      
 VAR
-  long weatherstack[40] 
-  byte path_holder[64]
+  long weatherstack[80] 
+  byte path_holder[128]
+
+  ' Statistics
+  long stat_refreshes
+  long stat_errors
+  
 DAT
-productName   BYTE      "ybox2 weather",0      
+productName   BYTE      "ybox2 info widget",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
   
 PUB init | i
   outa[0]:=0
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
+
+  stat_refreshes:=0
+  stat_errors:=0
   
   settings.start
   subsys.init
@@ -223,6 +231,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
     tel.waitConnectTimeout(2000)
      
     if NOT tel.isEOF
+      stat_refreshes++
 
       term.str(string($1,$B,12,"                                       "))
       term.str(string($1,$A,39,$C,$8," ",$1))
@@ -267,6 +276,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
             quit
           if cnt-timeout>10*clkfreq ' 10 second timeout      
             subsys.StatusFatalError
+            stat_errors++
             showMessage(string("Error: Connection Lost!"))    
             tel.close
             ++port ' Change the source port, just in case
@@ -276,6 +286,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
             quit
     else
       subsys.StatusFatalError
+      stat_errors++
       showMessage(string("Error: Failed to Connect!"))    
       tel.close
       ++port ' Change the source port, just in case
@@ -541,6 +552,12 @@ pub httpServer | char, i, lineLength,contentSize,authorized
           http.str(string("</tt></div>"))
         http.str(string("<div><tt>RTC: "))
         http.dec(subsys.RTC)
+        http.str(string("</tt></div>"))
+        http.str(string("<div><tt>Refreshes: "))
+        http.dec(stat_refreshes)
+        http.str(string("</tt></div>"))
+        http.str(string("<div><tt>Errors: "))
+        http.dec(stat_errors)
         http.str(string("</tt></div>"))
         http.str(string("<div><tt>INA: "))
         repeat i from 0 to 7
