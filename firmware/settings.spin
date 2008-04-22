@@ -119,8 +119,9 @@ PUB removeKey(key) | iter, nextKey
   lock
   iter := findKey_(key)
   if iter
-    nextKey := iter-3-byte[iter-2]
-    bytemove(SettingsBottom+iter-nextKey+1,SettingsBottom, nextKey-SettingsBottom)
+'    nextKey := iter-  3-byte[iter-2]
+    nextKey := iter-  (4+((byte[iter-2]+1) & !1))
+    bytemove(SettingsBottom+iter-nextKey,SettingsBottom, nextKey-SettingsBottom+1)
   unlock
   return iter
 PUB setData(key,ptr,size_) | iter
