@@ -1049,10 +1049,12 @@ DAT
 CON
   DHCP_STATE_UNBOUND = 0       
   DHCP_STATE_RENEW = 1       
-  DHCP_STATE_REBINDING = 2       
+  DHCP_STATE_REBIND = 2       
   DHCP_STATE_BOUND = 3       
   DHCP_STATE_DISABLED = 4       
 
+  DHCP_PORT_CLIENT = 68
+  DHCP_PORT_SERVER = 67
   '******************************************************************
   '*      DHCP Message
   '******************************************************************
@@ -1082,8 +1084,9 @@ PRI dhcp_init
     settings.removeKey(settings#NET_IPv4_MASK)
     settings.removeKey(settings#NET_IPv4_GATE)
 pub dhcp_rebind
+'' This should be called when the ethernet cable is unplugged.
   if ip_dhcp_state<>DHCP_STATE_DISABLED
-    ip_dhcp_state:=DHCP_STATE_UNBOUND
+    ip_dhcp_state:=DHCP_STATE_REBIND
     ip_dhcp_delay:=0       
     ip_dhcp_next:=0
 PRI dhcp_process
@@ -1093,8 +1096,24 @@ PRI dhcp_process
       DHCP_STATE_UNBOUND:
         send_dhcp_request
         if ip_dhcp_delay<33
-          ip_dhcp_delay++
           ip_dhcp_delay*=2
+          ip_dhcp_delay++
+        ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
+      DHCP_STATE_REBIND:
+        send_dhcp_request
+        if ip_dhcp_delay<33
+          ip_dhcp_delay*=2
+          ip_dhcp_delay++
+        else
+          ip_dhcp_state:=DHCP_STATE_UNBOUND
+        ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
+      DHCP_STATE_RENEW:
+        send_dhcp_request
+        if ip_dhcp_delay<33
+          ip_dhcp_delay*=2
+          ip_dhcp_delay++
+        else
+          ip_dhcp_state:=DHCP_STATE_UNBOUND
         ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
       DHCP_STATE_BOUND:
         dhcp_rebind
@@ -1132,13 +1151,18 @@ PRI send_dhcp_request | i, pkt_len
   
   nic.start_frame
 
-  compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
-  compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68,0)
-
   ip_dhcp_xid := randseed?
-  
-  compose_bootp(1,0,ip_dhcp_xid,ip_dhcp_delay,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
+
+  if ip_dhcp_state==DHCP_STATE_REBIND OR ip_dhcp_state==DHCP_STATE_RENEW
+    compose_ethernet_header(@ip_dhcp_server_mac,@local_macaddr,$0800)
+    compose_ip_header(PROT_UDP,@ip_dhcp_server_ip,@ip_addr)
+    compose_udp_header(DHCP_PORT_SERVER,DHCP_PORT_CLIENT,0)
+    compose_bootp(1,0,ip_dhcp_xid,ip_dhcp_delay,@ip_addr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
+  else
+    compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
+    compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
+    compose_udp_header(DHCP_PORT_SERVER,DHCP_PORT_CLIENT,0)
+    compose_bootp(1,0,ip_dhcp_xid,ip_dhcp_delay,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -1149,7 +1173,11 @@ PRI send_dhcp_request | i, pkt_len
   ' DHCP Message Type
   nic.wr_frame(53)
   nic.wr_frame($01)
-  nic.wr_frame($01)
+  case ip_dhcp_state
+    DHCP_STATE_REBIND: nic.wr_frame(3)
+    DHCP_STATE_RENEW: nic.wr_frame(3)
+    DHCP_STATE_UNBOUND: nic.wr_frame(1)
+    other: nic.wr_frame(1)
 
   ' DHCP Client-ID
   nic.wr_frame(61)
@@ -1160,7 +1188,7 @@ PRI send_dhcp_request | i, pkt_len
   ' End of vendor data
   nic.wr_frame($FF)
 
-  nic.wr_frame_pad(46)
+  nic.wr_frame_pad(47)
 
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
@@ -1176,7 +1204,7 @@ PRI dhcp_offer_response | i, ptr
 
   compose_ethernet_header(@bcast_macaddr,@local_macaddr,$0800)
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
-  compose_udp_header(67,68,0)
+  compose_udp_header(DHCP_PORT_SERVER,DHCP_PORT_CLIENT,0)
 
   ip_dhcp_xid := randseed?
   
@@ -1238,12 +1266,12 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
 
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
-  if srcport <> 67
-    ' If the sender isn't sending on the DHCP server port
-    ' then we shouldn't be listening.
-    return
+'  if srcport <> DHCP_PORT_SERVER
+'    ' If the sender isn't sending on the DHCP server port
+'    ' then we shouldn't be listening.
+'    return
     
-  if ip_dhcp_state<>DHCP_STATE_UNBOUND
+  if ip_dhcp_state=>DHCP_STATE_BOUND
     return
     
   xid := BYTE[pkt][DHCP_xid] << 24 + BYTE[pkt][constant(DHCP_xid + 1)] << 16 + BYTE[pkt][constant(DHCP_xid + 2)] << 8 + BYTE[pkt][constant(DHCP_xid + 3)]
@@ -1260,10 +1288,11 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
         53 : ' DHCP message type
           if byte[ptr+2]==2
             dhcp_offer_response
+            ip_dhcp_next+=2
             return
           if byte[ptr+2]<>5
             ' If this isn't an ACK, then ignore it.
-            'return
+            return
       if byte[ptr]
         ptr++
         ptr+=byte[ptr]+1
@@ -1299,7 +1328,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
         51 :
           bytemove(@ip_dhcp_next,ptr+2,4) ' lease time
           ip_dhcp_next := conv_endianlong(ip_dhcp_next)
-          ip_dhcp_next>>=2
+          ip_dhcp_next>>=1
           ip_dhcp_next+=long[RTCADDR]
         '58 : ' DHCP renewal time
         '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
