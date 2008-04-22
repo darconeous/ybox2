@@ -88,11 +88,12 @@ PUB init | i
     term.out(13)  
 
   if NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
-    term.str(string("Waiting for IP address...",13))
+    term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
       delay_ms(500)
-
-  term.str(string("IPv4 ADDR:"))
+  term.out($0A)
+  term.out($00)  
+  term.str(string("IPv4 ADDR: "))
   repeat i from 0 to 3
     if i
       term.out(".")
@@ -100,7 +101,7 @@ PUB init | i
   term.out(13)  
 
   if settings.getData(settings#NET_IPv4_DNS,@weatherstack,4)
-    term.str(string("DNS ADDR:"))
+    term.str(string("DNS ADDR: "))
     repeat i from 0 to 3
       if i
         term.out(".")
@@ -144,6 +145,9 @@ PUB main | ircode
 
   repeat
     \httpServer
+    subsys.StatusFatalError
+    SadChirp
+    
 
   return
   
@@ -198,7 +202,7 @@ PUB main | ircode
       subsys.StatusFatalError
     
 
-pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in
+pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
   port := 20000
   retrydelay := 500
   repeat
@@ -210,7 +214,8 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in
     if tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
       next
     
-    term.str(string($1,$A,39,$C,1," ",$C,$8))
+    term.str(string($1,$A,39,$C,1," ",$C,$8,$1,$B))
+    term.out(0)
   
     tel.resetBuffers
     
@@ -234,21 +239,28 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in
       tel.str(string("User-Agent: PropTCP",13,10))
       tel.str(string("Connection: close",13,10,13,10)) 
 
-      gotstart := false
+      lineLength:=0
+      repeat while ((in:=tel.rxtime(2000)) <> -1) AND (NOT tel.isEOF)
+        if (in == 13)
+          in:=tel.rxtime(2000)
+        if (in == 10)
+          ifnot lineLength
+            quit
+          lineLength:=0
+        else
+          lineLength++
+          
       timeout := cnt
       repeat
         if (in := tel.rxcheck) > 0
- 
-          if gotstart AND in <> 10
+          if in <> 10
             term.out(in)
-
-          if in == $01
-            gotstart := true
         else
           ifnot tel.isConnected
             ' Success!
             retrydelay := 500 ' Reset the retry delay
             subsys.StatusIdle
+            term.str(string($B,12))    
             term.dec(subsys.RTC) ' Print out the RTC value
             delay_ms(30000)     ' 30 sec delay
             subsys.StatusLoading
@@ -409,6 +421,26 @@ pri httpURLUnescapeInplace(in_ptr) | out_ptr,char,val
     byte[out_ptr++]:=char
   byte[out_ptr++]:=0
   return TRUE
+
+pri parseIPStr(instr,outaddr) | char, i,j
+  repeat j from 0 to 3
+    BYTE[outaddr][j]:=0
+  j:=0
+  repeat while j < 4
+    case BYTE[instr]
+      "0".."9":
+        BYTE[outaddr][j]:=BYTE[outaddr][j]*10+BYTE[instr]-"0"
+      ".":
+        j++
+      other:
+        quit
+    instr++
+  if j==3
+    return TRUE
+  abort FALSE 
+      
+         
+
 pub httpServer | char, i, lineLength,contentSize,authorized
 
   repeat
@@ -540,7 +572,7 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         http.txip(@httpQuery)
         http.str(string("' /><br />"))
 
-        http.str(string("<input type='submit' />"))
+        http.str(string("<input name='submit' type='submit' />"))
         http.str(string("</form>"))
         
         
@@ -563,11 +595,14 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         if httpGetField(@httpQuery,string("SP"),@buffer,127)
           settings.setString(settings#SERVER_PATH,@buffer)  
 
-        ' TODO: Server address parsing
-        'if httpGetField(@httpQuery,string("SA"),@buffer,127)
-        '  settings.setString(settings#SERVER_PATH,@buffer)  
+        if httpGetField(@httpQuery,string("SA"),@buffer,127)
+          parseIPStr(@buffer,@buffer2)
+          settings.setData(settings#SERVER_IPv4_ADDR,@buffer2,4)  
         
-
+        settings.removeKey($1010)
+        settings.removeKey(settings#MISC_STAGE_TWO)
+        settings.commit
+        
         http.str(@HTTP_303)
         http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         http.str(@HTTP_CONNECTION_CLOSE)
