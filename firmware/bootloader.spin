@@ -166,7 +166,8 @@ PUB init | i
   'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
   'settings.removeKey(settings#MISC_PASSWORD)  
       
-  httpServer
+  repeat
+    \httpServer
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
@@ -215,6 +216,7 @@ PRI initial_configuration | i
   ' Original board = $000A0B09
   ' Adafruit board = $01090A0B
   'settings.setLong(settings#MISC_LED_CONF,$01090A0B)
+  'settings.setLong(settings#MISC_LED_CONF,$000A0B09)
 
   settings.commit
   return TRUE
@@ -309,6 +311,7 @@ pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
       repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
          BYTE[outvalue][i++]:=byte[packeddataptr++]
       BYTE[outvalue][i]:=0
+      httpURLUnescapeInplace(outvalue)
       return i
     if BYTE[packeddataptr] <> BYTE[keystring][i]
       ' skip to &
@@ -321,9 +324,29 @@ pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
     else
       packeddataptr++
       i++  
-      
-
   return 0
+
+pri httpURLUnescapeInplace(in_ptr) | out_ptr,char,val
+  out_ptr:=in_ptr
+  repeat while (char:=byte[in_ptr++])
+    if char=="%"
+      case (char:=byte[in_ptr++])
+        "a".."f": val:=char-"a"+10
+        "A".."F": val:=char-"A"+10
+        "0".."9": val:=char-"0"
+        0: quit
+        other: next
+      val:=val<<4
+      case (char:=byte[in_ptr++])
+        "a".."f": val|=char-"a"+10
+        "A".."F": val|=char-"A"+10
+        "0".."9": val|=char-"0"
+        0: quit
+        other: next
+      char:=val
+    byte[out_ptr++]:=char
+  byte[out_ptr++]:=0
+  return TRUE
            
 
      
@@ -550,6 +573,23 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
         http.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/ledconfig"))
+        ifnot authorized
+          httpUnauthorized
+          next
+        http.str(@HTTP_200)
+        http.str(@HTTP_CONNECTION_CLOSE)
+        http.str(@CR_LF)
+        if httpQuery[0]=="1"
+          settings.removeKey($1010)
+          settings.setLong(settings#MISC_LED_CONF,$000A0B09)
+          settings.commit
+          http.str(string("ENABLED (NEEDS REBOOT)",13,10))
+        else
+          settings.removeKey($1010)
+          settings.removeKey(settings#MISC_LED_CONF)
+          settings.commit
+          http.str(string("DISABLED (NEEDS REBOOT)",13,10))
       elseif strcomp(@httpPath,string("/autoboot"))
         ifnot authorized
           httpUnauthorized

@@ -42,15 +42,19 @@ DAT
         ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
         ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
         ip_dns          byte    $04,$02,$02,$04          ' network dns        
-        ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
         ip_maxhops      byte    $80
-        ip_dhcp_expire  long    0                   ' DHCP expiration
 
 
         bcast_ipaddr    long    $FFFFFFFF
         any_ipaddr    long    $00000000
         bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
 
+' DHCP Vars
+        ip_dhcp_mac     byte    $FF, $FF, $FF, $FF, $FF, $FF
+        ip_dhcp_expire  long    0                   ' DHCP expiration
+        ip_dhcp_xid     long    0
+        ip_dhcp_server  byte    0,0,0,0
+        
 OBJ
   nic : "driver_enc28j60"
   random   : "RealRandom"
@@ -171,12 +175,11 @@ PRI service_packet
       handle_udp 
   else
     if BYTE[pkt][enetpacketType0] == $08 AND BYTE[pkt][enetpacketType1] == $00
-      if compare_ipaddr(pkt+ip_destaddr,@ip_addr)
-        case BYTE[pkt][ip_proto]
-          PROT_ICMP : \handle_icmp
-          PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
-          PROT_UDP :  \handle_udp
-
+      case BYTE[pkt][ip_proto]
+        PROT_ICMP : \handle_icmp
+        PROT_TCP :  \handle_tcp                       ' handles abort out of tcp handlers (no socket found)
+        PROT_UDP :  \handle_udp
+       
 PRI compare_ipaddr(ip1ptr,ip2ptr)
   return BYTE[ip1ptr][0] == BYTE[ip2ptr][0] AND BYTE[ip1ptr][1] == BYTE[ip2ptr][1] AND BYTE[ip1ptr][2] == BYTE[ip2ptr][2] AND BYTE[ip1ptr][3] == BYTE[ip2ptr][3]
 PRI has_valid_ip_addr
@@ -273,6 +276,10 @@ PRI handle_arpreply | handle, handle_addr, ip, found
     bytemove(handle_addr + sSrcMac, pkt + arp_shaddr, 6)
     BYTE[handle_addr + sConState] := SCONNECTING
 PRI bounce_unreachable(code) | i
+  ifnot compare_ipaddr(pkt+ip_destaddr,@ip_addr)
+    ' Don't bounce unless it was specifically for us
+    return
+
   nic.start_frame
   compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0800)
   compose_ip_header(PROT_ICMP,pkt+ip_srcaddr,@ip_addr)
@@ -359,7 +366,9 @@ PRI send_dhcp_request | i, pkt_len
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68,0)
 
-  compose_bootp(1,0,++pkt_id,long[RTCADDR]-ip_dhcp_expire,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
+  ip_dhcp_xid := ++pkt_id
+  
+  compose_bootp(1,0,ip_dhcp_xid,long[RTCADDR]-ip_dhcp_expire,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -399,7 +408,9 @@ PRI dhcp_offer_response | i, ptr
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(67,68,0)
 
-  compose_bootp($01,byte[pkt+DHCP_hops],++pkt_id,word[pkt+DHCP_secs],pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
+  ip_dhcp_xid := ++pkt_id
+  
+  compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,word[pkt+DHCP_secs],pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
@@ -453,15 +464,20 @@ PRI dhcp_offer_response | i, ptr
 
   return nic.send_frame
    
-PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len
+PRI handle_udp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
   ' Handles incoming UDP packets
 
-  srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
+  'srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
   if NOT has_valid_ip_addr
     if dstport == 68 AND srcport == 67
+      xid := BYTE[pkt][DHCP_xid] << 24 + BYTE[pkt][constant(DHCP_xid + 1)] << 16 + BYTE[pkt][constant(DHCP_xid + 2)] << 8 + BYTE[pkt][constant(DHCP_xid + 3)]
+      if xid<>ip_dhcp_xid
+        ' Transaction ID doesn't match. Ignore this packet.
+        return
+
       if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
         ' this is a DHCP packet! We should send a request.
         ptr:=pkt+DHCP_Options+4
@@ -502,6 +518,7 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
             01 : bytemove(@ip_subnet,ptr+2,4)
             03 : bytemove(@ip_gateway,ptr+2,4)
             06 : bytemove(@ip_dns,ptr+2,4)
+            54 : bytemove(@ip_dhcp_server,ptr+2,4)
             23 : ' Default IP maxhops
               bytemove(@ip_maxhops,ptr+2,2)
               ip_maxhops := conv_endianlong(ip_maxhops)
@@ -541,6 +558,10 @@ PRI handle_udp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
   ' Handles incoming TCP packets
+
+  ifnot compare_ipaddr(pkt+ip_destaddr,@ip_addr)
+    ' Only let TCP work if the destination matches our address.
+    abort
 
   srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]

@@ -142,7 +142,9 @@ PUB main | ircode
 
   cognew(WeatherUpdate, @weatherstack) 
 
-  httpServer
+  repeat
+    \httpServer
+
   return
   
   repeat while true
@@ -297,10 +299,10 @@ OBJ
 VAR
   byte httpMethod[8]
   byte httpPath[64]
-  byte httpQuery[128]
+  byte httpQuery[160]
   byte httpHeader[32]
-  byte buffer[128]
-  byte buffer2[128]
+  byte buffer[160]
+  byte buffer2[160]
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
 CR_LF         BYTE      13,10,0
@@ -340,7 +342,7 @@ pri httpParseRequest(method,path,query) | i,char
       ' If we stopped on a question mark, then grab the query
       BYTE[path][i]:=0
       i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
+      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<126
         BYTE[query][i]:=char
         if char == " " OR char == "#" OR char == 13
           quit
@@ -363,7 +365,50 @@ pri httpNotFound
   http.str(@CR_LF)
   http.str(@HTTP_404)
 
-
+pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
+  i:=0
+  repeat while BYTE[packeddataptr]
+    if BYTE[packeddataptr]=="=" 'AND strsize(keystring)==i
+      packeddataptr++
+      i:=0
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
+         BYTE[outvalue][i++]:=byte[packeddataptr++]
+      BYTE[outvalue][i]:=0
+      httpURLUnescapeInplace(outvalue)
+      return i
+    if BYTE[packeddataptr] <> BYTE[keystring][i]
+      ' skip to &
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&"
+        packeddataptr++
+      ifnot byte[packeddataptr] 
+        quit
+      packeddataptr++
+      i:=0
+    else
+      packeddataptr++
+      i++  
+  return 0
+pri httpURLUnescapeInplace(in_ptr) | out_ptr,char,val
+  out_ptr:=in_ptr
+  repeat while (char:=byte[in_ptr++])
+    if char=="%"
+      case (char:=byte[in_ptr++])
+        "a".."f": val:=char-"a"+10
+        "A".."F": val:=char-"A"+10
+        "0".."9": val:=char-"0"
+        0: quit
+        other: next
+      val:=val<<4
+      case (char:=byte[in_ptr++])
+        "a".."f": val|=char-"a"+10
+        "A".."F": val|=char-"A"+10
+        "0".."9": val|=char-"0"
+        0: quit
+        other: next
+      char:=val
+    byte[out_ptr++]:=char
+  byte[out_ptr++]:=0
+  return TRUE
 pub httpServer | char, i, lineLength,contentSize,authorized
 
   repeat
@@ -376,11 +421,15 @@ pub httpServer | char, i, lineLength,contentSize,authorized
       next
     http.resetBuffers
     contentSize:=0
-    repeat while NOT http.isConnected
+    repeat 100
+      if http.isConnected
+        quit
       http.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
 
+    ifnot http.isConnected
+      next
 
     httpParseRequest(@httpMethod,@httpPath,@httpQuery)
 
@@ -421,7 +470,7 @@ pub httpServer | char, i, lineLength,contentSize,authorized
             httpHeader[0]:=0
 
              
-    if strcomp(@httpMethod,string("GET"))
+    if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
         http.str(@HTTP_200)
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
@@ -431,6 +480,9 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         http.str(@productName)
         http.str(string("</h1><hr />"))
         http.str(string("<h2>Info</h2>"))
+        'repeat i from settings#SettingsBottom to settings#SettingsTop-1
+        '  http.hex(BYTE[i],2)
+        '  http.tx(" ")
         if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
           http.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
@@ -505,10 +557,22 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         ifnot authorized
           httpUnauthorized
           next
-        http.str(@HTTP_200)
+
+        if httpGetField(@httpQuery,string("SH"),@buffer,127)
+          settings.setString(settings#SERVER_HOST,@buffer)  
+        if httpGetField(@httpQuery,string("SP"),@buffer,127)
+          settings.setString(settings#SERVER_PATH,@buffer)  
+
+        ' TODO: Server address parsing
+        'if httpGetField(@httpQuery,string("SA"),@buffer,127)
+        '  settings.setString(settings#SERVER_PATH,@buffer)  
+        
+
+        http.str(@HTTP_303)
+        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("NOT YET IMPLEMENTED",13,10))
+        http.str(string("OK",13,10))
 
       elseif strcomp(@httpPath,string("/reboot"))
         ifnot authorized
@@ -521,10 +585,7 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         http.close
         reboot
       else           
-        http.str(@HTTP_404)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_404)
+        httpNotFound
     else
         http.str(@HTTP_501)
         http.str(@HTTP_CONNECTION_CLOSE)
