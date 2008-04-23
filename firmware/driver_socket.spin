@@ -1215,6 +1215,15 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame($01)
   nic.wr_frame_data(@local_macaddr,6)
 
+  ' DHCP Parameter Request List
+  nic.wr_frame(55)
+  nic.wr_frame(5) ' 5 bytes long
+  nic.wr_frame(1) ' subnet mask
+  nic.wr_frame(3) ' gateway
+  nic.wr_frame(6) ' DNS server
+  nic.wr_frame(23) ' IP maxhops
+  nic.wr_frame(51) ' lease time
+  
   if long[pkt+DHCP_yiaddr]
     nic.wr_frame(50)
     nic.wr_frame($04)
