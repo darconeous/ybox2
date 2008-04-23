@@ -319,8 +319,7 @@ PRI handle_udp | dstport
   dstport := BYTE[pkt][UDP_destport] << 8 + BYTE[pkt][constant(UDP_destport + 1)]
 
   case dstport
-    68: handle_dhcp
-    '69: handle_tftp
+    DHCP_PORT_CLIENT: handle_dhcp
     other: bounce_unreachable(3)
         
 PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
@@ -1104,7 +1103,7 @@ pub dhcp_rebind
 '' This should be called when the ethernet cable is unplugged.
   if ip_dhcp_state<>DHCP_STATE_DISABLED
     ip_dhcp_state:=DHCP_STATE_UNBOUND
-    ip_dhcp_delay:=0       
+    ip_dhcp_delay:=2       
     ip_dhcp_next:=0
 PRI dhcp_process
 '' Called by the main network loop periodicly
@@ -1255,10 +1254,10 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
 
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 
-'  if srcport <> DHCP_PORT_SERVER
-'    ' If the sender isn't sending on the DHCP server port
-'    ' then we shouldn't be listening.
-'    return
+  if srcport <> DHCP_PORT_SERVER
+    ' If the sender isn't sending on the DHCP server port
+    ' then we shouldn't be listening.
+    return
     
   if ip_dhcp_state=>DHCP_STATE_BOUND
     return
@@ -1277,11 +1276,16 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
         53 : ' DHCP message type
           if byte[ptr+2]==DHCP_TYPE_OFFER
             dhcp_offer_response
-            ip_dhcp_next+=2
+            ' Lets wait an extra 4 seconds for a reply
+            ip_dhcp_next:=LONG[RTCADDR]+4      
+            return
+          if byte[ptr+2]==DHCP_TYPE_NAK
+            ' Nak'd!
+            ip_dhcp_xid++
             return
           if byte[ptr+2]<>DHCP_TYPE_ACK
             ' If this isn't an ACK, then ignore it.
-            'return
+            return
       if byte[ptr]
         ptr++
         ptr+=byte[ptr]+1
@@ -1316,8 +1320,11 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
         51 :
           bytemove(@ip_dhcp_next,ptr+2,4) ' lease time
           ip_dhcp_next := conv_endianlong(ip_dhcp_next)
-          ip_dhcp_next>>=1
-          ip_dhcp_next+=long[RTCADDR]
+          if ip_dhcp_next == $FFFFFFFF
+            ip_dhcp_next := $7FFFFFFF
+          else
+            ip_dhcp_next>>=1
+            ip_dhcp_next+=long[RTCADDR]
         '58 : ' DHCP renewal time
         '  bytemove(@ip_dhcp_expire,ptr+2,4) ' lease time
         '  ip_dhcp_expire := conv_endianlong(ip_dhcp_expire)
