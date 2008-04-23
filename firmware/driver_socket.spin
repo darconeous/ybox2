@@ -108,19 +108,26 @@ PUB stop
     cogstop(cog~ - 1)           ' stop the tcp engine
   nic.stop                    ' stop nic driver (kills spi engine)
 
-PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
+PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
 
   ' Start the ENC28J60 driver in a new cog
   nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic
     
   pkt := nic.get_packetpointer
 
-  dhcp_process
     
   i := 0
+  linkstat:=nic.isLinkUp
 
-  nic.banksel(nic#EPKTCNT)      ' select packet count bank
+  if linkstat  
+    dhcp_process
+
   repeat
+    ifnot nic.isLinkUp
+      repeat while NOT nic.isLinkUp
+      dhcp_rebind
+      
+    nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
     if pkt_count > 0
       service_packet            ' handle packet
@@ -132,7 +139,6 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
-    nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
 
 PRI service_packet
   ' lets process this frame

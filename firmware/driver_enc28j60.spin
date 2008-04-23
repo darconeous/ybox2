@@ -198,6 +198,9 @@ PUB wr_phy(register, data)
   banksel(MISTAT)
   repeat while ((rd_macreg(MISTAT) & MISTAT_BUSY) > 0)
 
+PUB isLinkUp
+  return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
+  
 PUB rd_sram : data
 '' Read ENC28J60 8k Buffer Memory
 
