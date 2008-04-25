@@ -456,10 +456,9 @@ pub httpServer | char, i, lineLength,contentSize,authorized
 
   repeat
     repeat while \http.listen(80) == -1
-      term.str(string("Warning: No free sockets",13))
       if ina[subsys#BTTNPin]
         reboot
-      delay_ms(2000)
+      delay_ms(1000)
       http.closeall
       next
     http.resetBuffers

@@ -5,9 +5,6 @@
         Designed for use with a 64KB EEPROM. It will not work
         properly with a 32KB EEPROM.
 
-        See the method 'initial_configuration' to change settings
-        like the MAC address, IP address, server address, etc.
-
         If your pin assignments are different, you'll need to
         change them here and in the subsys object.
 
@@ -36,10 +33,13 @@ productName   BYTE      "ybox2 bootloader v0.9",0
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
-PUB init | i
+PUB init | i, tv_mode
   dira[0]:=1 ' Set direction on reset pin
   outa[0]:=0 ' Set state on reset pin to LOW
 
+  ' Default to NTSC
+  tv_mode:=term#MODE_NTSC
+  
   ' Load persistent environment settings  
   settings.start  
 
@@ -61,24 +61,16 @@ PUB init | i
   ' Fire up the almighty subsys
   subsys.init
   subsys.StatusLoading
-  
-  term.start(12)
+
+  ' If there is a TV mode preference in the EEPROM, load it up.
+  if settings.findKey(settings#MISC_TV_MODE)
+    tv_mode := settings.getByte(settings#MISC_TV_MODE)
+    
+  ' Start the TV Terminal
+  term.startWithMode(12,tv_mode)
 
   ' Output the title, URLs, and squigly line.
-  term.str(string($0C,7))
-  term.str(@productName)
-  term.out(13)
-  term.str(@productURL)
-  term.out(13)
-  term.str(@productURL2)
-  term.out(13)
-  term.out($0c)
-  term.out(2)
-  repeat term#cols/2
-    term.out($8E)
-    term.out($88)
-  term.out($0c)
-  term.out(0)
+  printBanner
 
   if NOT stage_two AND settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
@@ -253,18 +245,69 @@ PRI initial_configuration | i
   return TRUE
 
 PUB atoi(inptr) | i,char, retVal
-
   retVal:=0
-  repeat 8
+  
+  ' Skip leading whitespace
+  repeat while BYTE[inptr] AND BYTE[inptr]==" "
+    inptr++
+   
+  repeat 10
     case (char := BYTE[inptr++])
       "0".."9":
         retVal:=retVal*10+char-"0"
-      " ":
-        if retVal<>0
-          return retVal
       OTHER:
         return retVal
   return retVal 
+pri printBanner
+  term.str(string($0C,7))
+  term.str(@productName)
+  term.out(13)
+  term.str(@productURL)
+  term.out(13)
+  term.str(@productURL2)
+  term.out(13)
+  term.out($0c)
+  term.out(2)
+  repeat term#cols/2
+    term.out($8E)
+    term.out($88)
+  term.out($0c)
+  term.out(0)
+
+pri buttonCheck
+  if ina[subsys#BTTNPin]
+    ' If the user is holding down the button, wait two seconds.
+    repeat 10
+      if ina[subsys#BTTNPin]
+        delay_ms(200)
+
+    if ina[subsys#BTTNPin]
+      ' The user is still holding down the button.
+      ' They must want to change the video mode!
+
+      term.stop
+
+      if NOT settings.findKey(settings#MISC_TV_MODE) OR settings.getByte(settings#MISC_TV_MODE)==0
+        settings.removeKey($1010)
+        settings.setByte(settings#MISC_TV_MODE,term#MODE_PAL)
+        term.startWithMode(12,term#MODE_PAL)
+        printBanner
+        term.str(string("PAL Mode Selected",13))
+      else
+        settings.removeKey($1010)
+        settings.setByte(settings#MISC_TV_MODE,term#MODE_NTSC)
+        term.startWithMode(12,term#MODE_NTSC)
+        printBanner
+        term.str(string("NTSC Mode Selected",13))
+
+      settings.commit
+      subsys.chirpHappy
+
+      ' Wait for the user to let go
+      repeat while ina[subsys#BTTNPin]
+    else
+      ' The user let go... They must just want to boot to stage2
+      boot_stage2
     
   
 VAR
@@ -318,12 +361,12 @@ pri httpNotFound
   websocket.str(@HTTP_CONNECTION_CLOSE)
   websocket.str(@CR_LF)
   websocket.str(@HTTP_404)
+
      
 pub httpServer | char, i,j, lineLength,contentLength,authorized
   repeat
     repeat while \websocket.listen(80) == -1
-      if ina[subsys#BTTNPin]
-        boot_stage2
+      buttonCheck
       delay_ms(1000)
       websocket.closeall
       next
@@ -331,8 +374,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
     contentLength:=0
 
     repeat while NOT websocket.waitConnectTimeout(100)
-      if ina[subsys#BTTNPin]
-        boot_stage2
+      buttonCheck
       
     http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)
 
@@ -372,7 +414,11 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
         indexPage(authorized)
-        
+      elseif strcomp(@httpPath,string("/info"))
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        infoPage
       elseif strcomp(@httpPath,string("/password"))
         ifnot authorized
           httpUnauthorized
@@ -436,7 +482,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
       elseif strcomp(@httpPath,string("/login"))
         ifnot authorized
           httpUnauthorized
-          websocket.close
+          websocket.close                                                               
           next
         websocket.str(@HTTP_303)
         websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
@@ -480,6 +526,29 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           websocket.str(string("DISABLED",13,10))
+      elseif strcomp(@httpPath,string("/tvmode"))
+        ifnot authorized
+          httpUnauthorized
+          websocket.close
+          next
+        websocket.str(@HTTP_303)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        if httpQuery[0]=="1"
+          settings.removeKey($1010)
+          settings.setByte(settings#MISC_TV_MODE,term#MODE_PAL)
+          settings.commit
+          term.stop
+          term.startWithMode(12,term#MODE_PAL)
+          websocket.str(string("PAL",13,10))
+        else
+          settings.removeKey($1010)
+          settings.setByte(settings#MISC_TV_MODE,term#MODE_NTSC)
+          settings.commit
+          term.stop
+          term.startWithMode(12,term#MODE_NTSC)
+          websocket.str(string("NTSC",13,10))
       elseif strcomp(@httpPath,RAMIMAGE_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
@@ -585,6 +654,41 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
       websocket.str(@HTTP_501)
     
     websocket.close
+pub infoPage | i
+
+  if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
+    websocket.str(string("ybox.macaddr = '"))
+    repeat i from 0 to 5
+      if i
+        websocket.tx("-")
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.str(string("'",10))
+
+  if settings.getData(settings#MISC_UUID,@httpQuery,16)
+    websocket.str(string("ybox.uuid = '"))
+    repeat i from 0 to 3
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.tx("-")
+    repeat i from 4 to 5
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.tx("-")
+    repeat i from 6 to 7
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.tx("-")
+    repeat i from 8 to 9
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.tx("-")
+    repeat i from 10 to 15
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.str(string("'",10))
+    
+  websocket.str(string("ybox.rtc = "))
+  websocket.dec(subsys.RTC)
+  websocket.tx(10)
+  websocket.str(string("ybox.ina = "))
+  websocket.dec(ina)
+  websocket.tx(10)
+
 
 pub indexPage(authorized) | i
   websocket.str(string("<html><body><h1>"))

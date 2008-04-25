@@ -45,6 +45,7 @@ CON
   MISC_AUTOBOOT      = ("A"<<8) + "B"
   MISC_SOUND_DISABLE = ("s"<<8) + "-"
   MISC_LED_CONF      = ("L"<<8) + "C" ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
+  MISC_TV_MODE       = ("t"<<8) + "v" ' 1 byte, 0=NTSC, 1=PAL
 
   MISC_STAGE_TWO     = ("S"<<8) + "2"
 

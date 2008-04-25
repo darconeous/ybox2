@@ -13,6 +13,8 @@ CON
 
   tv_count = 14
 
+  MODE_NTSC = 0
+  MODE_PAL = 1
   
 VAR
 
@@ -42,7 +44,7 @@ OBJ
   tv : "tv"
 
 
-PUB start(basepin) : okay
+PUB startWithMode(basepin,mode) : okay
 
 '' Start terminal - starts a cog
 '' returns false if no cog available
@@ -54,10 +56,13 @@ PUB start(basepin) : okay
   tv_pins := (basepin & $38) << 1 | (basepin & 4 == 4) & %0101
   tv_screen := @screen
   tv_colors := @colors
+  tv_mode |= mode
   
   okay := tv.start(@tv_status)
 
-
+PUB start(basepin)
+  return startWithMode(basepin,MODE_NTSC)
+  
 PUB stop
 
 '' Stop terminal - frees a cog
