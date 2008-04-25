@@ -1,16 +1,6 @@
 {{
-        ybox2 - bootloader object
+        ybox2 - Webserver Example
         http://www.deepdarc.com/ybox2
-
-        Designed for use with a 64KB EEPROM. It will not work
-        properly with a 32KB EEPROM.
-
-        See the method 'initial_configuration' to change settings
-        like the MAC address, IP address, server address, etc.
-
-        If your pin assignments are different, you'll need to
-        change them here and in the subsys object.
-
 }}
 CON
 
@@ -18,13 +8,12 @@ CON
   _xinfreq = 5_000_000
 OBJ
 
-'  tel           : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
-'  eeprom        : "Basic_I2C_Driver"
-'  random        : "RealRandom"
   numbers       : "numbers"
+  socket       : "api_telnet_serial"
+  http         : "http"
                                      
 VAR
   long stack[100] 
@@ -40,6 +29,11 @@ PUB init | i
   
   settings.start
   numbers.init
+
+  ' If you aren't using this thru the bootloader, set your
+  ' settings here. 
+  'settings.setData(settings#NET_MAC_ADDR,string(02,01,01,01,01,01),6)  
+  'settings.setLong(settings#MISC_LED_CONF,$000A0B09)
   
   subsys.init
   term.start(12)
@@ -53,10 +47,8 @@ PUB init | i
   repeat term#cols/2
     term.out($8E)
     term.out($88)
-    'term.out($86)
   term.out($0c)
   term.out(0)
-  'term.out(13)
   
   subsys.StatusLoading
 
@@ -75,14 +67,14 @@ PUB init | i
   
   dira[0]:=0
 
-  if not \http.start(1,2,3,4,6,7,-1,-1)
+  if not \socket.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
-    SadChirp
+    subsys.chirpSad
     waitcnt(clkfreq*10000 + cnt)
     reboot
 
-  HappyChirp
+  subsys.chirpHappy
 
   if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
     term.str(string("IPv4 ADDR: DHCP..."))
@@ -114,30 +106,15 @@ PUB showMessage(str)
   term.str(str)    
   term.str(string($C,$8))    
 
-pub HappyChirp | i, j
-  repeat j from 0 to 2
-    repeat i from 0 to 30
-      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-      delay_ms(1)
-    outa[subsys#SPKRPin]:=0  
-    delay_ms(50)
-pub SadChirp | i
-
-  repeat i from 0 to 15
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    delay_ms(17)
-  outa[subsys#SPKRPin]:=0  
-
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
-OBJ
-  http          : "api_telnet_serial"
 VAR
   byte httpMethod[8]
   byte httpPath[64]
   byte httpQuery[64]
   byte httpHeader[32]
+  byte buffer[128]
 
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
@@ -150,202 +127,170 @@ HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
-pub httpServer | char, i, lineLength,contentSize
+pub httpServer | char, i, lineLength,contentLength
 
   repeat
-    repeat while \http.listen(80) == -1
-      term.str(string("Warning: No free sockets",13))
+    repeat while \socket.listen(80) == -1
       if ina[subsys#BTTNPin]
         reboot
-      delay_ms(2000)
-      http.closeall
+      delay_ms(1000)
+      socket.closeall
       next
-    http.resetBuffers
-    contentSize:=0
-    repeat while NOT http.isConnected
-      http.waitConnectTimeout(100)
+    socket.resetBuffers
+    repeat while NOT socket.isConnected
+      socket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
-    i:=0
 
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      httpMethod[i]:=char
-      if httpMethod[i] == " "
-        quit
-      i++
-    httpMethod[i]:=0
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-      httpPath[i]:=char
-      if httpPath[i] == " " OR httpPath[i] == "?"  OR httpPath[i] == "#"
-        quit
-      i++
-
-    httpQuery[0]:=0
-    if httpPath[i]=="?"
-      ' If we stopped on a question mark, then grab the query
-      httpPath[i]:=0
-      i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-        httpQuery[i]:=char
-        if httpQuery[i] == " " OR httpPath[i] == "#"
-          quit
-        i++        
-    else
-      httpPath[i]:=0
-    httpQuery[i]:=0
+    http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
   
-    lineLength:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
-      if (char == 13)
-        ifnot lineLength
-          quit
-        lineLength:=0
-      else
-        if (char <> 10)
-          if lineLength<31
-            httpHeader[lineLength]:=char
-            if char == ":"
-              httpHeader[lineLength]:=0
-              if strcomp(@httpHeader,string("Content-Length"))
-                contentSize := http.readDec
-                lineLength:=1
-          lineLength++
-             
+    contentLength:=0
+    repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
+      if strcomp(@httpHeader,string("Content-Length"))
+        contentLength:=numbers.fromStr(@buffer,numbers#DEC)
+               
     if strcomp(@httpMethod,string("GET"))
       if strcomp(@httpPath,string("/"))
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("<html><head><title>ybox2</title></head><body><h1>"))
-        http.str(@productName)
-        http.str(string("</h1><hr />"))
-        http.str(string("<h2>Info</h2>"))
-        if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
-          http.str(string("<div><tt>MAC: "))
-          repeat i from 0 to 5
-            if i
-              http.tx("-")
-            http.hex(byte[@httpMethod][i],2)
-          http.str(string("</tt></div>"))
-        if settings.getData(settings#MISC_UUID,@httpQuery,16)
-          http.str(string("<div><tt>UUID: "))
-          repeat i from 0 to 3
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 4 to 5
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 6 to 7
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 8 to 9
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 10 to 15
-            http.hex(byte[@httpQuery][i],2)
-          http.str(string("</tt></div>"))
-        http.str(string("<div><tt>RTC: "))
-        http.dec(subsys.RTC)
-        http.str(string("</tt></div>"))
-        http.str(string("<div><tt>INA: "))
-        repeat i from 0 to 7
-          http.dec(ina[i])
-        http.tx(" ")
-        repeat i from 8 to 15
-          http.dec(ina[i])
-        http.tx(" ")
-        repeat i from 16 to 23
-          http.dec(ina[i])
-        http.tx(" ")
-        repeat i from 23 to 31
-          http.dec(ina[i])          
-        http.str(string("</tt></div>"))
-        
-        http.str(string("<h2>Actions</h2>"))
-        http.str(string("<div>Noise: <a href='/chirp'>Chirp</a> | <a href='/groan'>Groan</a></div>"))
-        http.str(string("<div>LED: <a href='/led?ff0000'>Red</a> | <a href='/led?00ff00'>Green</a> | <a href='/led?ffff00'>Yellow</a> | <a href='/led?0000ff'>Blue</a> | <a href='/led_rainbow'>Rainbow</a></div>"))
-        http.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
-        http.str(string("<h2>Other</h2>"))
-        http.str(string("<div><a href='"))
-        http.str(@productURL)
-        http.str(string("'>More info</a></div>"))
-
-        http.str(string("</body></html>",13,10))
-        
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONTENT_TYPE_HTML)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        indexPage
       elseif strcomp(@httpPath,string("/reboot"))
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONTENT_TYPE_HTML)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("<h1>Rebooting</h1>",13,10))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        socket.str(string("REBOOTING",13,10))
         delay_ms(1000)
-        http.close
+        socket.close
         delay_ms(1000)
         reboot
       elseif strcomp(@httpPath,string("/chirp"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        HappyChirp
-        http.str(string("OK",13,10))
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        subsys.chirpHappy
+        socket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/groan"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        SadChirp
-        http.str(string("OK",13,10))
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        subsys.chirpSad
+        socket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/toggle"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
         dira[30]:=1
         outa[30]:=!outa[30]
-        http.str(string("OK",13,10))
+        socket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/led"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
         httpQuery[6]:=0
         i:=numbers.FromStr(@httpQuery,numbers#HEX)
         subsys.statusSolid(byte[@i][2],byte[@i][1],byte[@i][0])
-        http.hex(byte[@i][2],2)
-        http.hex(byte[@i][1],2)
-        http.hex(byte[@i][0],2)
-        http.str(string(" OK",13,10))
+        socket.hex(byte[@i][2],2)
+        socket.hex(byte[@i][1],2)
+        socket.hex(byte[@i][0],2)
+        socket.str(string(" OK",13,10))
       elseif strcomp(@httpPath,string("/print"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        http.unescapeURLInPlace(@httpQuery)
         term.str(@httpQuery)
         term.out(13)
-        http.str(string(" OK",13,10))
+        socket.str(string(" OK",13,10))
       elseif strcomp(@httpPath,string("/led_rainbow"))
-        http.str(@HTTP_303)
-        http.str(string("Location: /",13,10))
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
         subsys.statusIdle
-        http.str(string("OK",13,10))
+        socket.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/irtest"))
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        subsys.irTest
+        socket.str(string("OK",13,10))
       else           
-        http.str(@HTTP_404)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_404)
+        socket.str(@HTTP_404)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        socket.str(@HTTP_404)
     else
-        http.str(@HTTP_501)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_501)
+        socket.str(@HTTP_501)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        socket.str(@HTTP_501)
     
-    http.close
+    socket.close
 
 
 
+pri indexPage | i
+  socket.str(string("<html><head><title>ybox2</title></head><body><h1>"))
+  socket.str(@productName)
+  socket.str(string("</h1><hr />"))
+  socket.str(string("<h2>Info</h2>"))
+  if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
+    socket.str(string("<div><tt>MAC: "))
+    repeat i from 0 to 5
+      if i
+        socket.tx("-")
+      socket.hex(byte[@httpMethod][i],2)
+    socket.str(string("</tt></div>"))
+  if settings.getData(settings#MISC_UUID,@httpQuery,16)
+    socket.str(string("<div><tt>UUID: "))
+    repeat i from 0 to 3
+      socket.hex(byte[@httpQuery][i],2)
+    socket.tx("-")
+    repeat i from 4 to 5
+      socket.hex(byte[@httpQuery][i],2)
+    socket.tx("-")
+    repeat i from 6 to 7
+      socket.hex(byte[@httpQuery][i],2)
+    socket.tx("-")
+    repeat i from 8 to 9
+      socket.hex(byte[@httpQuery][i],2)
+    socket.tx("-")
+    repeat i from 10 to 15
+      socket.hex(byte[@httpQuery][i],2)
+    socket.str(string("</tt></div>"))
+  socket.str(string("<div><tt>RTC: "))
+  socket.dec(subsys.RTC)
+  socket.str(string("</tt></div>"))
+  socket.str(string("<div><tt>INA: "))
+  repeat i from 0 to 7
+    socket.dec(ina[i])
+  socket.tx(" ")
+  repeat i from 8 to 15
+    socket.dec(ina[i])
+  socket.tx(" ")
+  repeat i from 16 to 23
+    socket.dec(ina[i])
+  socket.tx(" ")
+  repeat i from 23 to 31
+    socket.dec(ina[i])          
+  socket.str(string("</tt></div>"))
+   
+  socket.str(string("<h2>Actions</h2>"))
+  socket.str(string("<div>Noise: <a href='/chirp'>Chirp</a> | <a href='/groan'>Groan</a></div>"))
+  socket.str(string("<div>LED: <a href='/led?ff0000'>Red</a> | <a href='/led?00ff00'>Green</a> | <a href='/led?ffff00'>Yellow</a> | <a href='/led?0000ff'>Blue</a> | <a href='/led_rainbow'>Rainbow</a> | <a href='/irtest'>irtest</a></div>"))
+  socket.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
+  socket.str(string("<h2>Other</h2>"))
+  socket.str(string("<div><a href='"))
+  socket.str(@productURL)
+  socket.str(string("'>More info</a></div>"))
+   
+  socket.str(string("</body></html>",13,10))
   

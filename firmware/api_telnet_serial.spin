@@ -2,7 +2,7 @@ OBJ
   tcp : "driver_socket"
   
 VAR
-  long handle
+  long _handle
   word listenport
   byte listening
 
@@ -13,46 +13,48 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
 PUB stop
 
   tcp.stop
-
+PUB handle
+  return _handle
 PUB connect(ip, remoteport, localport)
 
   listening := false
   close
-  return (handle := tcp.connect(ip, remoteport, localport))
+  return (_handle := tcp.connect(ip, remoteport, localport))
 
 PUB listen(port)
 
   listenport := port
   listening := true
   close
-  return (handle := tcp.listen(listenport))
+  return (_handle := tcp.listen(listenport))
 
 PUB isConnected
 
-  if handle=>0
-    return tcp.isConnected(handle)
+  if _handle=>0
+    return tcp.isConnected(_handle)
   return FALSE
 PUB isEOF
 
-  return tcp.isEOF(handle)
+  return tcp.isEOF(_handle)
 
 PUB resetBuffers
 
   if handle=>0
-    tcp.resetBuffers(handle)
+    tcp.resetBuffers(_handle)
 
 PUB waitConnectTimeout(ms) | t
 
   t := cnt
   repeat until isConnected or (((cnt - t) / (clkfreq / 1000)) > ms)
     if listening
-      ifnot tcp.isValidHandle(handle)
+      ifnot tcp.isValidHandle(_handle)
         listen(listenport)
-
+  return isConnected
+  
 PUB close
 
-  if handle=>0
-    tcp.close(handle)
+  if _handle=>0
+    tcp.close(_handle)
 PUB closeAll
 
   tcp.closeAll
@@ -64,15 +66,15 @@ PUB rxflush
 PUB rxcheck
 
   if listening
-    if tcp.isEOF(handle)
+    if tcp.isEOF(_handle)
       listen(listenport)
 
-  return tcp.readByteNonBlocking(handle)
+  return tcp.readByteNonBlocking(_handle)
 
 PUB rxtime(ms) : rxbyte | t
   rxbyte:=-1
   t := cnt
-  if handle=>0
+  if _handle=>0
     repeat until (rxbyte := rxcheck) => 0 or (cnt - t) / (clkfreq / 1000) > ms
 
 PUB rx : rxbyte
@@ -82,7 +84,7 @@ PUB rx : rxbyte
 PUB txcheck(txbyte)
 
   if listening
-    ifnot tcp.isValidHandle(handle)
+    ifnot tcp.isValidHandle(_handle)
       listen(listenport)
 
   return tcp.writeByteNonBlocking(handle, txbyte)

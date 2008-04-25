@@ -89,6 +89,25 @@ PUB StatusLoading
 PUB StatusFatalError
   StatusOff
   modecog := cognew(FatalErrorCycle, @stack) + 1 
+PUB StatusError
+  StatusOff
+  modecog := cognew(FatalErrorCycle, @stack) + 1
+PRI delay_ms(Duration)
+  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
+  
+   
+pub ChirpHappy | i, j
+  repeat j from 0 to 2
+    repeat i from 0 to 30
+      outa[SPKRPin]:=!outa[SPKRPin]  
+      delay_ms(1)
+    outa[SPKRPin]:=0  
+    delay_ms(50)
+pub ChirpSad | i
+  repeat i from 0 to 15
+    outa[SPKRPin]:=!outa[SPKRPin]  
+    delay_ms(17)
+  outa[SPKRPin]:=0
 
 PUB StatusSolid(r,g,b)
   StatusOff

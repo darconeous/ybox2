@@ -31,22 +31,9 @@ CON
   apiversion = 3
   RTCADDR = $7A00
 
-DAT
-        ' Don't set any of these values by hand!
-        ' Use the associated setting keys instead.
-        ' See the settings object for more details.
-        local_macaddr   byte    $02, $00, $00, $00, $00, $01
-        local_mtu       word    1500
-        ip_addr         byte    0,0,0,0            ' device's ip address
-        ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
-        ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
-        ip_dns          byte    $04,$02,$02,$04          ' network dns        
-        ip_maxhops      byte    $80
-
-
-        bcast_ipaddr    long    $FFFFFFFF
-        any_ipaddr    long    $00000000
-        bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
+' Circular Buffer constants
+  buffer_length = 1024 ' MUST BE A POWER OF TWO.
+  buffer_mask   = buffer_length - 1
 
 OBJ
   nic : "driver_enc28j60"
@@ -54,19 +41,36 @@ OBJ
   settings : "settings"
 '  term     : "TV_Text"
 '  subsys   : "subsys"
-VAR
-  long stack[200]     ' stack for new cog (currently ~74 longs, using 128 for future expansion)                      
-  long randseed
+DAT
+' Don't set any of these values by hand!
+' Use the associated setting keys instead.
+' See the settings object for more details.
+local_macaddr   byte    $02, $00, $00, $00, $00, $01
+local_mtu       word    1500
+ip_addr         byte    0,0,0,0            ' device's ip address
+ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
+ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
+ip_dns          byte    $04,$02,$02,$04          ' network dns        
+ip_maxhops      byte    $80
+ 
+ 
+bcast_ipaddr    long    $FFFFFFFF
+any_ipaddr    long    $00000000
+bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
+DAT
+  stack       long 0[200]
+  randseed    long 0
   
 DAT             
-  ' Global variables (accessable between cogs)
-  cog                   long 0                       
-  
-  pkt                   long 0                  ' memory address of packet start
-  pkt_count             byte 0                  ' packet count
 
-  pkt_id                long 0                  ' packet fragmentation id
-  pkt_isn               long 0                  ' packet initial sequence number
+  ' Global variables (accessable between cogs)
+  cog         long 0                       
+  
+  pkt         long 0                  ' memory address of packet start
+  pkt_count   byte 0                  ' packet count
+
+  pkt_id      long 0                  ' packet fragmentation id
+  pkt_isn     long 0                  ' packet initial sequence number
   
 
 PUB init
@@ -84,7 +88,6 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 ''               Must be in order: ip_addr. ip_subnet, ip_gateway, ip_dns
 
   stop
-  'stk.Init(@stack, 128)
 
   random.start
   randseed := random.random
@@ -344,7 +347,6 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     reject_tcp
     abort handle_addr
-
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0 AND datain_len > 0
     ' ACK, without SYN, with data
 
@@ -816,12 +818,14 @@ CON
 '         4 bytes - (1 long ) my sequence number
 '         4 bytes - (1 long ) my acknowledgement number
 '         4 bytes - (1 long ) src ip
+'         4 bytes - (1 long ) time last activity occured in this state
 '         2 bytes - (1 word ) src port
 '         2 bytes - (1 word ) dst port
+'         4 bytes - (1 long ) When to send next ack (a terrible hACK)
 '         1 byte  - (1 byte ) conn state
 '         6 bytes - (6 bytes) src mac address
 '         1 byte  - (1 byte ) handle index
-' total: 24 bytes
+' total: 32 bytes
 
   sSocketBytes  = 32      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
   
@@ -854,90 +858,18 @@ CON
 
 DAT
               long      0       ' long align the socket state data
-sSockets      byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0           ' [0] socket 1 (last byte denotes handle index)
-              byte      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1           ' [1] socket 2 (last byte denotes handle index)
-
-
-CON
-' Circular Buffer constants
-  buffer_length = 1024 '128
-  buffer_mask   = buffer_length - 1
+sSockets      byte      0[sSockIndex],0           ' [0] socket 1 (last byte denotes handle index)
+              byte      0[sSockIndex],1           ' [1] socket 2 (last byte denotes handle index)
 
 DAT
-' Circular buffer variables (one long per socket)
-'             Socket:   [           1            ] [           2            ]
-rx_head       word      0                        , buffer_length
-rx_tail       word      0                        , buffer_length
-tx_head       word      0                        , buffer_length
-tx_tail       word      0                        , buffer_length
+' Circular buffer variables (one word per socket)
+rx_head       word      0[sNumSockets]
+rx_tail       word      0[sNumSockets]
+tx_head       word      0[sNumSockets]
+tx_tail       word      0[sNumSockets]
 
-tx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
-
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
-
-rx_buffer     long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 1
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
-
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' socket 2
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-              long      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0     ' 128 bytes
+tx_buffer     byte 0 [buffer_length*sNumSockets] 
+rx_buffer     byte 0 [buffer_length*sNumSockets]
 
 
 CON

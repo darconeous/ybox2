@@ -19,16 +19,17 @@ CON
 
 OBJ
 
-  tel           : "api_telnet_serial"
-  http          : "api_telnet_serial"
+'  tel           : "api_telnet_serial"
+  websocket     : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
   eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
-  base64        : "base64"                                   
+  base64        : "base64"
+  http          : "http"
 VAR
-  long stack[80] 
+  long stack[10] 
   byte stage_two
 DAT
 productName   BYTE      "ybox2 bootloader v0.9",0      
@@ -36,19 +37,34 @@ productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
 PUB init | i
-  'cognew(@bootstage2,0)
-  'return
-  
-  outa[0]:=0
-  dira[0]:=1
-  dira[subsys#SPKRPin]:=1
-  
-  webCog:=0
+  dira[0]:=1 ' Set direction on reset pin
+  outa[0]:=0 ' Set state on reset pin to LOW
 
-  settings.start
-  
+  ' Load persistent environment settings  
+  settings.start  
+
+  ' Set the direction on the sound pin depending
+  ' on if we are muted or not.
+  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
+    dira[subsys#SPKRPin]:=1
+  else
+    dira[subsys#SPKRPin]:=0
+
+  ' If we are in the second stage of a bootloader upgrade,
+  ' then we need set the appropriate variable.
+  if settings.findKey(settings#MISC_STAGE_TWO)
+    stage_two := TRUE
+    settings.removeKey(settings#MISC_STAGE_TWO)
+  else
+    stage_two := FALSE
+
+  ' Fire up the almighty subsys
   subsys.init
+  subsys.StatusLoading
+  
   term.start(12)
+
+  ' Output the title, URLs, and squigly line.
   term.str(string($0C,7))
   term.str(@productName)
   term.out(13)
@@ -63,15 +79,6 @@ PUB init | i
     term.out($88)
   term.out($0c)
   term.out(0)
-  
-  subsys.StatusLoading
-
-
-  if settings.findKey(settings#MISC_STAGE_TWO)
-    stage_two := TRUE
-    settings.removeKey(settings#MISC_STAGE_TWO)
-  else
-    stage_two := FALSE
 
   if NOT stage_two AND settings.findKey(settings#MISC_AUTOBOOT)
     delay_ms(2000)
@@ -79,16 +86,17 @@ PUB init | i
       boot_stage2
     else
       term.str(string("Autoboot Aborted.",13))
-      SadChirp    
+      subsys.chirpSad    
 
   if NOT settings.size
     if NOT \initial_configuration
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
-      SadChirp
+      subsys.chirpSad
       waitcnt(clkfreq*100000 + cnt)
       reboot
 
+  ' Print out the MAC address on the TV
   if settings.getData(settings#NET_MAC_ADDR,@stack,6)
     term.str(string("MAC: "))
     repeat i from 0 to 5
@@ -96,13 +104,6 @@ PUB init | i
         term.out("-")
       term.hex(byte[@stack][i],2)
     term.out(13)  
-  
-  dira[0]:=0
-
-  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-    dira[subsys#SPKRPin]:=1
-  else
-    dira[subsys#SPKRPin]:=0
 
   ' If the user is holding down the button, wait two seconds.
   repeat 10
@@ -112,33 +113,40 @@ PUB init | i
   ' If the button is still being held down, then
   ' assume we are in a password reset condition.
   if ina[subsys#BTTNPin]
-    HappyChirp
-    SadChirp
-    HappyChirp
-    SadChirp
-    HappyChirp
+    subsys.chirpHappy
+    subsys.chirpSad
+    subsys.chirpHappy
+    subsys.chirpSad
+    subsys.chirpHappy
     if ina[subsys#BTTNPin]
       term.str(string("RESET MODE",13))
-      SadChirp
+      subsys.chirpSad
       resetSettings
-      HappyChirp
+      subsys.chirpHappy
       reboot
 
-  if not \tel.start(1,2,3,4,6,7,-1,-1)
+  outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
+  if not \websocket.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
-    SadChirp
-    waitcnt(clkfreq*10000 + cnt)
+    subsys.chirpSad
+    outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+    ' Reboot after 20 seconds.
+    waitcnt(clkfreq*20000 + cnt)
     reboot
 
-  HappyChirp
+  ' Make a happy noise, we are moving along!
+  subsys.chirpHappy
 
+  ' Wait for the IP address if we don't already have one.
   if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
     term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
       delay_ms(500)
-  term.out($0A)
-  term.out($00)  
+    term.out($0A)
+    term.out($00)  
+
+  ' Output the IP address we have aquired.
   term.str(string("IPv4 ADDR: "))
   repeat i from 0 to 3
     if i
@@ -146,6 +154,7 @@ PUB init | i
     term.dec(byte[@stack][i])
   term.out(13)  
 
+  ' If we have a DNS address, print that out too.
   if settings.getData(settings#NET_IPv4_DNS,@stack,4)
     term.str(string("DNS ADDR: "))
     repeat i from 0 to 3
@@ -160,8 +169,10 @@ PUB init | i
   else
     subsys.StatusIdle
 
+  ' Infinite loop
   repeat
     \httpServer
+    term.str(string("WEBSERVER EXCEPTION",13))
 PRI resetSettings | key, nextKey
 '' Preforms a "factory reset" by removing all
 '' settings except those used for device identification
@@ -182,11 +193,18 @@ PRI resetSettings | key, nextKey
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
+ 
+  outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+
+  ' Very aggressively shut down every other COG except our own.
   repeat i from 0 to 7
     if cogid<>i
       cogstop(i)
+
   ' Replace this cog with the bootloader
   coginit(0,@bootstage2,0)
+
+  ' Just in case...
   cogstop(cogid)
 PRI initial_configuration | i
   term.str(string("First boot!",13))
@@ -234,12 +252,24 @@ PRI initial_configuration | i
   settings.commit
   return TRUE
 
+PUB atoi(inptr) | i,char, retVal
+
+  retVal:=0
+  repeat 8
+    case (char := BYTE[inptr++])
+      "0".."9":
+        retVal:=retVal*10+char-"0"
+      " ":
+        if retVal<>0
+          return retVal
+      OTHER:
+        return retVal
+  return retVal 
     
   
 VAR
   byte buffer [128]
   byte buffer2 [128]
-  byte webCog
   byte httpMethod[8]
   byte httpPath[64]
   byte httpQuery[64]
@@ -269,155 +299,60 @@ STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 
 pri httpOutputLink(url,content)
-  http.str(string("<a href='"))
-  http.strxml(url)
-  http.str(string("'>"))
-  http.str(content)
-  http.str(string("</a>"))
+  websocket.str(string("<a href='"))
+  websocket.strxml(url)
+  websocket.str(string("'>"))
+  websocket.str(content)
+  websocket.str(string("</a>"))
   
-pri httpParseRequest(method,path,query) | i,char
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      BYTE[method][i]:=char
-      if char == " "
-        quit
-      i++
-    BYTE[method][i]:=0
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-      BYTE[path][i]:=char
-      if char == " " OR char == "?"  OR char == "#"
-        quit
-      i++
-
-    if BYTE[path][i]=="?"
-      ' If we stopped on a question mark, then grab the query
-      BYTE[path][i]:=0
-      i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-        BYTE[query][i]:=char
-        if char == " " OR char == "#" OR char == 13
-          quit
-        i++        
-      BYTE[query][i]:=0
-    else
-      BYTE[path][i]:=0
-      BYTE[query][0]:=0
 
 pri httpUnauthorized
-  http.str(@HTTP_401)
-  http.str(@HTTP_CONNECTION_CLOSE)
-  http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
-  http.str(@CR_LF)
-  http.str(@HTTP_401)
+  websocket.str(@HTTP_401)
+  websocket.str(@HTTP_CONNECTION_CLOSE)
+  websocket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  websocket.str(@CR_LF)
+  websocket.str(@HTTP_401)
 
 pri httpNotFound
-  http.str(@HTTP_404)
-  http.str(@HTTP_CONNECTION_CLOSE)
-  http.str(@CR_LF)
-  http.str(@HTTP_404)
-pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
-  i:=0
-  repeat while BYTE[packeddataptr]
-    if BYTE[packeddataptr]=="=" 'AND strsize(keystring)==i
-      packeddataptr++
-      i:=0
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
-         BYTE[outvalue][i++]:=byte[packeddataptr++]
-      BYTE[outvalue][i]:=0
-      httpURLUnescapeInplace(outvalue)
-      return i
-    if BYTE[packeddataptr] <> BYTE[keystring][i]
-      ' skip to &
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&"
-        packeddataptr++
-      ifnot byte[packeddataptr] 
-        quit
-      packeddataptr++
-      i:=0
-    else
-      packeddataptr++
-      i++  
-  return 0
-
-pri httpURLUnescapeInplace(in_ptr) | out_ptr,char,val
-  out_ptr:=in_ptr
-  repeat while (char:=byte[in_ptr++])
-    if char=="%"
-      case (char:=byte[in_ptr++])
-        "a".."f": val:=char-"a"+10
-        "A".."F": val:=char-"A"+10
-        "0".."9": val:=char-"0"
-        0: quit
-        other: next
-      val:=val<<4
-      case (char:=byte[in_ptr++])
-        "a".."f": val|=char-"a"+10
-        "A".."F": val|=char-"A"+10
-        "0".."9": val|=char-"0"
-        0: quit
-        other: next
-      char:=val
-    byte[out_ptr++]:=char
-  byte[out_ptr++]:=0
-  return TRUE
-           
-
+  websocket.str(@HTTP_404)
+  websocket.str(@HTTP_CONNECTION_CLOSE)
+  websocket.str(@CR_LF)
+  websocket.str(@HTTP_404)
      
-pub httpServer | char, i,j, lineLength,contentSize,authorized
-  webCog:=cogid+1
-
+pub httpServer | char, i,j, lineLength,contentLength,authorized
   repeat
-    repeat while \http.listen(80) == -1
-      term.str(string("No free sockets",13))
+    repeat while \websocket.listen(80) == -1
       if ina[subsys#BTTNPin]
         boot_stage2
-      delay_ms(2000)
-      http.closeall
+      delay_ms(1000)
+      websocket.closeall
       next
-    http.resetBuffers
-    contentSize:=0
-    repeat while NOT http.isConnected
-      http.waitConnectTimeout(100)
+    websocket.resetBuffers
+    contentLength:=0
+
+    repeat while NOT websocket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         boot_stage2
-
-    httpParseRequest(@httpMethod,@httpPath,@httpQuery)
+      
+    http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
-    
-    lineLength:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
-      if (char == 13)
-        char:=http.rxtime(1000)
-      if (char == 10)
-        ifnot lineLength
-          quit
-        lineLength:=0
-      else
-        if lineLength<31
-          httpHeader[lineLength++]:=char
-          if char == ":"
-            httpHeader[lineLength-1]:=0
-            if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
-              contentSize := http.readDec
-            elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-              http.rxtime(1000)
-              repeat i from 0 to 7 ' Skip the 'Basic' part
-                if http.rxtime(1000) == " " OR http.isEOF
-                  quit
-              i:=0
-              repeat while i<127 AND ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
-                buffer[i++]:=char
-                if (char == 13)
-                  quit
-              if i
-                buffer[i]:=0
-                base64.inplaceDecode(@buffer)  
-                settings.getString(settings#MISC_PASSWORD,@buffer2,127)
-                authorized:=strcomp(@buffer,@buffer2)
-            httpHeader[0]:=0
+
+    repeat while http.getNextHeader(websocket.handle,@httpHeader,32,@buffer,128)
+      if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
+        contentLength:=atoi(@buffer)
+      elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+        ' Skip past the word "Basic"
+        repeat i from 0 to 7
+          if buffer[i]==" "
+            i++
+            quit
+          if buffer[i]==0
+            quit
+        base64.inplaceDecode(@buffer+i)  
+        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
+        authorized:=strcomp(@buffer+i,@buffer2)
 
     ' Authorization check
     ' You can comment this out if you want to
@@ -432,311 +367,325 @@ pub httpServer | char, i,j, lineLength,contentSize,authorized
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
-        http.str(@HTTP_200)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("<html><body><h1>"))
-        http.str(@productName)
-        http.str(string("</h1><hr />"))
-        http.str(string("<h2>Info</h2>"))
-        if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
-          http.str(string("<div><tt>MAC: "))
-          repeat i from 0 to 5
-            if i
-              http.tx("-")
-            http.hex(byte[@httpMethod][i],2)
-          http.str(string("</tt></div>"))
-        if settings.getData(settings#MISC_UUID,@httpMethod,16)
-          http.str(string("<div><tt>UUID: "))
-          repeat i from 0 to 3
-            http.hex(byte[@httpMethod][i],2)
-          http.tx("-")
-          repeat i from 4 to 5
-            http.hex(byte[@httpMethod][i],2)
-          http.tx("-")
-          repeat i from 6 to 7
-            http.hex(byte[@httpMethod][i],2)
-          http.tx("-")
-          repeat i from 8 to 9
-            http.hex(byte[@httpMethod][i],2)
-          http.tx("-")
-          repeat i from 10 to 15
-            http.hex(byte[@httpMethod][i],2)
-          http.str(string("</tt></div>"))
-        http.str(string("<div><tt>RTC: "))
-        http.dec(subsys.RTC)
-        http.str(string("</tt></div>"))
-
-        http.str(string("<div><tt>Autoboot: "))
-        if settings.findKey(settings#MISC_AUTOBOOT)  
-          http.str(string("<b>ON</b> "))
-          if authorized
-            httpOutputLink(string("/autoboot?0"),string("disable"))
-        else
-          http.str(string("<b>OFF</b> "))
-          if authorized
-            httpOutputLink(string("/autoboot?1"),string("enable"))
-        http.str(string("</tt></div>"))
-
-        http.str(string("<div><tt>Password: "))
-        if settings.findKey(settings#MISC_PASSWORD)
-          http.str(string("SET"))  
-        else
-          http.str(string("NOT SET"))  
-        http.str(string("</tt></div>"))
-
-
-        if authorized
-          http.str(string("<form action='\password' method='POST'>"))
-          http.str(string("<div><label for='username'>Username:</label><input name='username' id='username' size='32' value='"))
-          http.strxml(string("admin"))
-          http.str(string("' /></div>"))
-          http.str(string("<div><label for='pwd1'>Password:</label><input name='pwd1' id='pwd1' type='password' size='32' /></div>"))
-          http.str(string("<div><label for='pwd2'>Password:</label><input name='pwd2' id='pwd2' type='password' size='32' /></div>"))
-           
-          http.str(string("<input type='submit' />"))
-          http.str(string("</form>"))
-           
-
-
-        
-        http.str(string("<h2>Actions</h2>"))
-        http.str(string("<div>"))
-        httpOutputLink(string("/reboot"),string("Reboot"))
-        http.tx(" ")
-        httpOutputLink(string("/stage2"),string("Boot stage 2"))
-        http.tx(" ")
-        httpOutputLink(string("/irtest"),string("IR Test Mode"))
-        ifnot authorized
-          http.tx(" ")
-          httpOutputLink(string("/login"),string("Login"))
-        http.str(string("</div>"))
-        
-
-        http.str(string("<h2>Files</h2>"))
-        http.str(string("<div>"))
-        httpOutputLink(@RAMIMAGE_EEPROM_FILE,@RAMIMAGE_EEPROM_FILE+1)
-        http.tx(" ")
-        httpOutputLink(@STAGE2_EEPROM_FILE,@STAGE2_EEPROM_FILE+1)
-        http.tx(" ")
-        httpOutputLink(@CONFIG_BIN_FILE,@CONFIG_BIN_FILE+1)
-        http.str(string("</div>"))
-
-        http.str(string("<h2>Other</h2>"))
-        http.str(string("<div>"))
-        httpOutputLink(@productURL,@productURL)
-        http.str(string("</div>"))
-        http.str(string("<div>"))
-        httpOutputLink(@productURL2,@productURL2)
-        http.str(string("</div>"))
-        http.str(string("</body></html>",13,10))
+        websocket.str(@HTTP_200)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        indexPage(authorized)
         
       elseif strcomp(@httpPath,string("/password"))
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
         i:=0
-        repeat while contentSize AND i<127
-          char:=http.rxtime(1000)
+        repeat while contentLength AND i<127
+          char:=websocket.rxtime(1000)
           buffer[i++]:=char
-          contentSize--
+          contentLength--
         buffer[i]:=0
         buffer2[0]:=0
-        i:=httpGetField(@buffer,string("username"),@buffer2,127)
+        i:=http.getFieldFromQuery(@buffer,string("username"),@buffer2,127)
         if i
           buffer2[i++]:=":"
-          j:=httpGetField(@buffer,string("pwd1"),@buffer2+i,63)
+          j:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2+i,63)
           ifnot j
              i:=0
           else
-            j:=httpGetField(@buffer,string("pwd2"),@httpQuery,63)
+            j:=http.getFieldFromQuery(@buffer,string("pwd2"),@httpQuery,63)
           if j==0 OR NOT strcomp(@httpQuery,@buffer2+i)
             i:=0
          
         ifnot i
-          http.str(string("HTTP/1.1 400 Bad Request",13,10))
-          http.str(@HTTP_CONNECTION_CLOSE)
-          http.str(@CR_LF)
-          http.str(string("Passwords didn't match.",13,10))
+          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.str(@CR_LF)
+          websocket.str(string("Passwords didn't match.",13,10))
         else
           settings.removeKey($1010)
           settings.setString(settings#MISC_PASSWORD,@buffer2)  
           settings.commit
            
-          http.str(@HTTP_303)
-          http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-          http.str(@HTTP_CONNECTION_CLOSE)
-          http.str(@CR_LF)
-          http.str(string("OK",13,10))
+          websocket.str(@HTTP_303)
+          websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+          websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.str(@CR_LF)
+          websocket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/reboot"))
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("REBOOTING",13,10))
-        http.close
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("REBOOTING",13,10))
+        websocket.close
+        outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
         reboot
       elseif strcomp(@httpPath,string("/irtest"))
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
         subsys.irTest
-        http.str(string("Status LED should now blink on IR activity.",13,10))
-        http.close
+        websocket.str(string("Status LED should now blink on IR activity.",13,10))
+        websocket.close
       elseif strcomp(@httpPath,string("/stage2"))
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("BOOTING STAGE 2",13,10))
-        http.close
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("BOOTING STAGE 2",13,10))
+        websocket.close
         boot_stage2
       elseif strcomp(@httpPath,string("/login"))
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_303)
-        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("OK",13,10))
+        websocket.str(@HTTP_303)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/ledconfig"))
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
         if httpQuery[0]=="1"
           settings.removeKey($1010)
           settings.setLong(settings#MISC_LED_CONF,$000A0B09)
           settings.commit
-          http.str(string("ENABLED (NEEDS REBOOT)",13,10))
+          websocket.str(string("ENABLED (NEEDS REBOOT)",13,10))
         else
           settings.removeKey($1010)
           settings.removeKey(settings#MISC_LED_CONF)
           settings.commit
-          http.str(string("DISABLED (NEEDS REBOOT)",13,10))
+          websocket.str(string("DISABLED (NEEDS REBOOT)",13,10))
       elseif strcomp(@httpPath,string("/autoboot"))
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_303)
-        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        websocket.str(@HTTP_303)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
         if httpQuery[0]=="1"
           settings.removeKey($1010)
           settings.setByte(settings#MISC_AUTOBOOT,1)
           settings.commit
-          http.str(string("ENABLED",13,10))
+          websocket.str(string("ENABLED",13,10))
         else
           settings.removeKey($1010)
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
-          http.str(string("DISABLED",13,10))
+          websocket.str(string("DISABLED",13,10))
       elseif strcomp(@httpPath,RAMIMAGE_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
-        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=ramimage.eeprom"))        
-        http.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=ramimage.eeprom"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
+        websocket.str(@CR_LF)
         repeat i from 0 to $7FFF
-          http.tx(BYTE[i])
+          websocket.tx(BYTE[i])
       elseif strcomp(@httpPath,STAGE2_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
-        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
-        http.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
+        websocket.str(@CR_LF)
         repeat i from 0 to $7FFF step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
             quit
           repeat j from 0 to 127
-            http.tx(buffer[j])
+            websocket.tx(buffer[j])
       elseif strcomp(@httpPath,@CONFIG_BIN_FILE)
         ifnot authorized
           httpUnauthorized
+          websocket.close
           next
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-bin"))        
-        http.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.bin"))        
-        http.str(@HTTP_HEADER_CONTENT_LENGTH)
-        http.str(string(": "))
-        http.dec(settings#SettingsSize)
-        http.str(@CR_LF)        
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-bin"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.bin"))        
+        websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
+        websocket.str(string(": "))
+        websocket.dec(settings#SettingsSize)
+        websocket.str(@CR_LF)        
+        websocket.str(@CR_LF)
         repeat i from settings#SettingsBottom to settings#SettingsTop step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
             quit
           repeat j from 0 to 127
-            http.tx(buffer[j])
+            websocket.tx(buffer[j])
       else           
         httpNotFound
     elseif strcomp(@httpMethod,string("PUT"))
       ifnot authorized
         httpUnauthorized
+        websocket.close
         next
-      if not contentSize
-          http.str(@HTTP_411)
-          http.str(@HTTP_CONNECTION_CLOSE)
-          http.str(@CR_LF)
-          http.str(@HTTP_411)
-      if strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE) OR strcomp(@httpPath,@CONFIG_BIN_FILE)
-        http.str(@HTTP_403)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_403)
+      if not contentLength
+        websocket.str(@HTTP_411)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(@HTTP_411)
+      elseif strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE) OR strcomp(@httpPath,@CONFIG_BIN_FILE)
+        websocket.str(@HTTP_403)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(@HTTP_403)
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
-        if (i:=\downloadFirmwareHTTP(contentSize))
-          SadChirp
+        if (i:=\downloadFirmwareHTTP(contentLength))
+          subsys.chirpSad
           subsys.StatusFatalError
-          http.str(string("HTTP/1.1 400 Bad Request",13,10))
-          http.str(@HTTP_CONNECTION_CLOSE)
-          http.str(@CR_LF)
-          http.str(string("Upload Failure",13,10))
-          http.dec(i)         
-          http.str(@CR_LF)
+          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.str(@CR_LF)
+          websocket.str(string("Upload Failure",13,10))
+          websocket.dec(i)         
+          websocket.str(@CR_LF)
         else
           if strcomp(@httpQuery,string("boot")) OR stage_two
-            http.str(@HTTP_303)
-            http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-            http.str(@HTTP_CONNECTION_CLOSE)
-            http.str(@CR_LF)
+            websocket.str(@HTTP_303)
+            websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+            websocket.str(@HTTP_CONNECTION_CLOSE)
+            websocket.str(@CR_LF)
             if stage_two
-              http.str(string("OK - Rebooting",13,10))
-              http.close
+              websocket.str(string("OK - Rebooting",13,10))
+              websocket.close
+              outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
               reboot
             else
-              http.str(string("OK - Booting stage 2",13,10))
-              http.close
+              websocket.str(string("OK - Booting stage 2",13,10))
+              websocket.close
               boot_stage2
           else
-            http.str(@HTTP_303)
-            http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-            http.str(@HTTP_CONNECTION_CLOSE)
-            http.str(@CR_LF)
-            http.str(string("OK",13,10))
+            websocket.str(@HTTP_303)
+            websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+            websocket.str(@HTTP_CONNECTION_CLOSE)
+            websocket.str(@CR_LF)
+            websocket.str(string("OK",13,10))
       else
         httpNotFound
     else
-      http.str(@HTTP_501)
-      http.str(@HTTP_CONNECTION_CLOSE)
-      http.str(@CR_LF)
-      http.str(@HTTP_501)
+      websocket.str(@HTTP_501)
+      websocket.str(@HTTP_CONNECTION_CLOSE)
+      websocket.str(@CR_LF)
+      websocket.str(@HTTP_501)
     
-    http.close
+    websocket.close
+
+pub indexPage(authorized) | i
+  websocket.str(string("<html><body><h1>"))
+  websocket.str(@productName)
+  websocket.str(string("</h1><hr />"))
+  websocket.str(string("<h2>Info</h2>"))
+  if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
+    websocket.str(string("<div><tt>MAC: "))
+    repeat i from 0 to 5
+      if i
+        websocket.tx("-")
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.str(string("</tt></div>"))
+  if settings.getData(settings#MISC_UUID,@httpMethod,16)
+    websocket.str(string("<div><tt>UUID: "))
+    repeat i from 0 to 3
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.tx("-")
+    repeat i from 4 to 5
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.tx("-")
+    repeat i from 6 to 7
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.tx("-")
+    repeat i from 8 to 9
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.tx("-")
+    repeat i from 10 to 15
+      websocket.hex(byte[@httpMethod][i],2)
+    websocket.str(string("</tt></div>"))
+  websocket.str(string("<div><tt>RTC: "))
+  websocket.dec(subsys.RTC)
+  websocket.str(string("</tt></div>"))
+   
+  websocket.str(string("<div><tt>Autoboot: "))
+  if settings.findKey(settings#MISC_AUTOBOOT)  
+    websocket.str(string("<b>ON</b> "))
+    if authorized
+      httpOutputLink(string("/autoboot?0"),string("disable"))
+  else
+    websocket.str(string("<b>OFF</b> "))
+    if authorized
+      httpOutputLink(string("/autoboot?1"),string("enable"))
+  websocket.str(string("</tt></div>"))
+   
+  websocket.str(string("<div><tt>Password: "))
+  if settings.findKey(settings#MISC_PASSWORD)
+    websocket.str(string("SET"))  
+  else
+    websocket.str(string("NOT SET"))  
+  websocket.str(string("</tt></div>"))
+   
+   
+  if authorized
+    websocket.str(string("<form action='\password' method='POST'>"))
+    websocket.str(string("<div><label for='username'>Username:</label><input name='username' id='username' size='32' value='"))
+    websocket.strxml(string("admin"))
+    websocket.str(string("' /></div>"))
+    websocket.str(string("<div><label for='pwd1'>Password:</label><input name='pwd1' id='pwd1' type='password' size='32' /></div>"))
+    websocket.str(string("<div><label for='pwd2'>Password:</label><input name='pwd2' id='pwd2' type='password' size='32' /></div>"))
+     
+    websocket.str(string("<input type='submit' />"))
+    websocket.str(string("</form>"))
+     
+   
+   
+   
+  websocket.str(string("<h2>Actions</h2>"))
+  websocket.str(string("<div>"))
+  httpOutputLink(string("/reboot"),string("Reboot"))
+  websocket.tx(" ")
+  httpOutputLink(string("/stage2"),string("Boot stage 2"))
+  websocket.tx(" ")
+  httpOutputLink(string("/irtest"),string("IR Test Mode"))
+  ifnot authorized
+    websocket.tx(" ")
+    httpOutputLink(string("/login"),string("Login"))
+  websocket.str(string("</div>"))
+   
+   
+  websocket.str(string("<h2>Files</h2>"))
+  websocket.str(string("<div>"))
+  httpOutputLink(@RAMIMAGE_EEPROM_FILE,@RAMIMAGE_EEPROM_FILE+1)
+  websocket.tx(" ")
+  httpOutputLink(@STAGE2_EEPROM_FILE,@STAGE2_EEPROM_FILE+1)
+  websocket.tx(" ")
+  httpOutputLink(@CONFIG_BIN_FILE,@CONFIG_BIN_FILE+1)
+  websocket.str(string("</div>"))
+   
+  websocket.str(string("<h2>Other</h2>"))
+  websocket.str(string("<div>"))
+  httpOutputLink(@productURL,@productURL)
+  websocket.str(string("</div>"))
+  websocket.str(string("<div>"))
+  httpOutputLink(@productURL2,@productURL2)
+  websocket.str(string("</div>"))
+  websocket.str(string("</body></html>",13,10))
+   
 
 
-pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
+pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j
   eeprom.Initialize(eeprom#BootPin)
 
   i:=0
@@ -747,11 +696,11 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
   else
     addr:=$8000 ' Stage one writes to the upper 32KB
 
-  if contentSize > $8000-settings#SettingsSize
-    contentSize:=$8000-settings#SettingsSize
+  if contentLength > $8000-settings#SettingsSize
+    contentLength:=$8000-settings#SettingsSize
    
   repeat
-    if (in := http.rxcheck) => 0
+    if (in := websocket.rxcheck) => 0
       subsys.StatusSolid(0,128,0)
       buffer[i++] := in
       if i == 128
@@ -775,14 +724,14 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
         
         term.out(".")
       if total => $8000-settings#SettingsSize
-        http.close
+        websocket.close
     else
       subsys.StatusSolid(128,0,0)
-      if http.isEOF OR (total+i) => contentSize
+      if websocket.isEOF OR (total+i) => contentLength
         if stage_two
           ' Do we have the correct number of bytes?
           if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))
-            SadChirp
+            subsys.chirpSad
             term.out(13)
             term.dec((total+i) - settings.getWord($1010))
             term.str(string(" byte diff!",13))
@@ -804,7 +753,7 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
 
           'If we got to this point, then everything matches! Write it out
           subsys.StatusLoading
-          HappyChirp
+          subsys.chirpHappy
 
           term.str(string(13,"Writing",13))
 
@@ -844,7 +793,7 @@ pub downloadFirmwareHTTP(contentSize) | timeout, retrydelay,in, i, total, addr,j
         term.str(string("done.",13))
         term.dec(total)
         term.str(string(" bytes written",13))
-        HappyChirp
+        subsys.chirpHappy
         subsys.StatusSolid(0,255,0)
         settings.setWord($1010,total)
         return 0
@@ -856,20 +805,6 @@ PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
   term.str(string($C,$8))    
-
-pub HappyChirp | i, j
-  repeat j from 0 to 2
-    repeat i from 0 to 30
-      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-      delay_ms(1)
-    outa[subsys#SPKRPin]:=0  
-    delay_ms(50)
-pub SadChirp | i
-
-  repeat i from 0 to 15
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    delay_ms(17)
-  outa[subsys#SPKRPin]:=0  
 
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
