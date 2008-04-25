@@ -18,6 +18,9 @@ OBJ
 VAR
   long stack[100] 
   byte stage_two
+  byte tv_mode
+  long hits
+  
 DAT
 productName   BYTE      "ybox2 webserver example",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
@@ -26,17 +29,37 @@ PUB init | i
   outa[0]:=0
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
+
+  ' Default to NTSC
+  tv_mode:=term#MODE_NTSC
+  
+  hits:=0
   
   settings.start
   numbers.init
 
   ' If you aren't using this thru the bootloader, set your
   ' settings here. 
-  'settings.setData(settings#NET_MAC_ADDR,string(02,01,01,01,01,01),6)  
-  'settings.setLong(settings#MISC_LED_CONF,$000A0B09)
+  {
+  settings.setData(settings#NET_MAC_ADDR,string(02,01,01,01,01,01),6)  
+  settings.setLong(settings#MISC_LED_CONF,$000A0B09)
+  settings.setByte(settings#NET_DHCPv4_DISABLE,TRUE)
+  settings.setData(settings#NET_IPv4_ADDR,string(192,168,2,10),4)
+  settings.setData(settings#NET_IPv4_MASK,string(255,255,255,0),4)
+  settings.setData(settings#NET_IPv4_GATE,string(192,168,2,1),4)
+  settings.setData(settings#NET_IPv4_DNS,string(4,2,2,4),4)
+  settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
+  }
   
   subsys.init
-  term.start(12)
+
+  ' If there is a TV mode preference in the EEPROM, load it up.
+  if settings.findKey(settings#MISC_TV_MODE)
+    tv_mode := settings.getByte(settings#MISC_TV_MODE)
+    
+  ' Start the TV Terminal
+  term.startWithMode(12,tv_mode)
+
   term.str(string($0C,7))
   term.str(@productName)
   term.out(13)
@@ -143,13 +166,14 @@ pub httpServer | char, i, lineLength,contentLength
         reboot
 
     http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
-  
+    
     contentLength:=0
     repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
       if strcomp(@httpHeader,string("Content-Length"))
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
                
     if strcomp(@httpMethod,string("GET"))
+      hits++
       if strcomp(@httpPath,string("/"))
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONTENT_TYPE_HTML)
@@ -266,8 +290,11 @@ pri indexPage | i
     repeat i from 10 to 15
       socket.hex(byte[@httpQuery][i],2)
     socket.str(string("</tt></div>"))
-  socket.str(string("<div><tt>RTC: "))
+  socket.str(string("<div><tt>Uptime: "))
   socket.dec(subsys.RTC)
+  socket.str(string("</tt></div>"))
+  socket.str(string("<div><tt>Hits since last reboot: "))
+  socket.dec(hits)
   socket.str(string("</tt></div>"))
   socket.str(string("<div><tt>INA: "))
   repeat i from 0 to 7

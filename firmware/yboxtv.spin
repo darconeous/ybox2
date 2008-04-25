@@ -24,6 +24,7 @@ OBJ
 VAR
   long weatherstack[80] 
   byte path_holder[128]
+  byte tv_mode
 
   ' Statistics
   long stat_refreshes
@@ -34,16 +35,26 @@ productName   BYTE      "ybox2 info widget",0
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
   
 PUB init | i
-  outa[0]:=0
-  dira[0]:=1
+  dira[0]:=1 ' Set direction on reset pin
+  outa[0]:=0 ' Set state on reset pin to LOW
   dira[subsys#SPKRPin]:=1
 
   stat_refreshes:=0
   stat_errors:=0
+
+  ' Default to NTSC
+  tv_mode:=term#MODE_NTSC
   
   settings.start
   subsys.init
-  term.start(12)
+
+  ' If there is a TV mode preference in the EEPROM, load it up.
+  if settings.findKey(settings#MISC_TV_MODE)
+    tv_mode := settings.getByte(settings#MISC_TV_MODE)
+    
+  ' Start the TV Terminal
+  term.startWithMode(12,tv_mode)
+
   term.str(string($0C,7))
   term.str(@productName)
   term.out(13)
@@ -76,8 +87,7 @@ PUB init | i
       waitcnt(clkfreq*100000 + cnt)
       reboot
   
-  dira[0]:=0
-
+  outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
   if not \tel.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError

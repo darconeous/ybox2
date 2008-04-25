@@ -16,7 +16,6 @@ CON
 
 OBJ
 
-'  tel           : "api_telnet_serial"
   websocket     : "api_telnet_serial"
   term          : "TV_Text"
   subsys        : "subsys"
@@ -80,7 +79,7 @@ PUB init | i, tv_mode
       term.str(string("Autoboot Aborted.",13))
       subsys.chirpSad    
 
-  if NOT settings.size
+  if NOT settings.findKey(settings#NET_MAC_ADDR)
     if NOT \initial_configuration
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
@@ -217,24 +216,7 @@ PRI initial_configuration | i
   settings.setData(settings#NET_MAC_ADDR,@stack,6)
 
   random.stop
-
-  'settings.setString(settings#MISC_PASSWORD,string("admin:password"))  
-
   
-  ' Uncomment and change these settings if you don't want to use DHCP
-  {
-  settings.setByte(settings#NET_DHCPv4_DISABLE,TRUE)
-  settings.setData(settings#NET_IPv4_ADDR,string(192,168,2,10),4)
-  settings.setData(settings#NET_IPv4_MASK,string(255,255,255,0),4)
-  settings.setData(settings#NET_IPv4_GATE,string(192,168,2,1),4)
-  settings.setData(settings#NET_IPv4_DNS,string(4,2,2,4),4)
-  }
-
-  ' If you want sound off by default, uncomment the next line
-  'settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
-
-  'settings.setByte(settings#MISC_AUTOBOOT,TRUE)
-
   ' RGB LED Configuration
   ' Original board = $000A0B09
   ' Adafruit board = $010B0A09 (This is the default)
@@ -719,7 +701,7 @@ pub indexPage(authorized) | i
     repeat i from 10 to 15
       websocket.hex(byte[@httpMethod][i],2)
     websocket.str(string("</tt></div>"))
-  websocket.str(string("<div><tt>RTC: "))
+  websocket.str(string("<div><tt>Uptime: "))
   websocket.dec(subsys.RTC)
   websocket.str(string("</tt></div>"))
    
