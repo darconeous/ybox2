@@ -697,7 +697,7 @@ pub addSubmitButton
 pub indexPage(authorized) | i
   websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
   websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
-  websocket.str(string("<style>body { margin: 8px; background-color: rgb(197,204,211); font-family: Helvetica; } .button { width: 240px; } h1 { text-align: center; } h2 { color: rgb(76,86,108); }</style>"))
+  websocket.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
 
  
 
