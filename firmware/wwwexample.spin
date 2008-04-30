@@ -317,7 +317,7 @@ pri indexPage | i
   term.str(string("Sending index page",13))
 
   socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
-  socket.str(string("<link rel='stylesheet' href='http://www.uscity.net/iphone/iPhoneButtons.css' />"))
+  socket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
   socket.str(string("<style>body { margin: 8px; background-color: rgb(197,204,211); font-family: Helvetica; } .button { width: 240px; } h1 { text-align: center; } h2 { color: rgb(76,86,108); }</style>"))
   socket.str(string("</head><body><h1>"))
   socket.str(@productName)
