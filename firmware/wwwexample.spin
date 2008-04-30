@@ -42,7 +42,7 @@ PUB init | i
   ' settings here. 
   {
   settings.setData(settings#NET_MAC_ADDR,string(02,01,01,01,01,01),6)  
-  settings.setLong(settings#MISC_LED_CONF,$000A0B09)
+  settings.setLong(settings#MISC_LED_CONF,$010B0A09)
   settings.setByte(settings#NET_DHCPv4_DISABLE,TRUE)
   settings.setData(settings#NET_IPv4_ADDR,string(192,168,2,10),4)
   settings.setData(settings#NET_IPv4_MASK,string(255,255,255,0),4)
@@ -124,6 +124,7 @@ PUB init | i
  
   repeat
     i:=\httpServer
+    subsys.chirpSad
     term.str(string("HTTP SERVER EXCEPTION "))
     term.dec(i)
     term.out(13)
@@ -165,15 +166,15 @@ pri httpUnauthorized
 pub httpServer | char, i, lineLength,contentLength,authorized
 
   repeat
-    term.str(string("Prepping...",13))
+    'term.str(string("Prepping...",13))
     repeat while \socket.listen(80) == -1
-      term.str(string("Unable to listen!",13))
+      'term.str(string("Unable to listen!",13))
       if ina[subsys#BTTNPin]
         reboot
-      delay_ms(1000)
+      delay_ms(100)
       socket.closeall
       next
-    term.str(string("Waiting",13))
+    'term.str(string("Waiting",13))
     socket.resetBuffers
     repeat while NOT socket.isConnected
       socket.waitConnectTimeout(100)
@@ -182,13 +183,13 @@ pub httpServer | char, i, lineLength,contentLength,authorized
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
-    term.str(string("Connected",13))
+    'term.str(string("Connected",13))
 
     'repeat while socket.isConnected
     '  term.out(socket.rxtime(1000))
     
     http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
-    term.str(string("Parsed Request",13))
+    'term.str(string("Parsed Request",13))
     
     contentLength:=0
     repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
@@ -206,12 +207,12 @@ pub httpServer | char, i, lineLength,contentLength,authorized
         settings.getString(settings#MISC_PASSWORD,@buffer2,127)
         authorized:=strcomp(@buffer+i,@buffer2)
 
-    term.str(string("Parsed Headers",13))
+    'term.str(string("Parsed Headers",13))
                
     if strcomp(@httpMethod,string("GET"))
       hits++
       if strcomp(@httpPath,string("/"))
-        term.str(string("Index Page",13))
+        'term.str(string("Index Page",13))
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONTENT_TYPE_HTML)
         socket.str(@HTTP_CONNECTION_CLOSE)
@@ -224,6 +225,7 @@ pub httpServer | char, i, lineLength,contentLength,authorized
           next
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.txmimeheader(string("Refresh"),string("12;url=/"))        
         socket.str(@CR_LF)
         socket.str(string("REBOOTING",13,10))
         delay_ms(1000)
@@ -243,6 +245,13 @@ pub httpServer | char, i, lineLength,contentLength,authorized
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         subsys.chirpSad
+        socket.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/click"))
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        subsys.click
         socket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/toggle"))
         socket.str(@HTTP_303)
@@ -314,7 +323,7 @@ pri httpOutputLink(url,class,content)
   socket.str(string("</a>"))
 
 pri indexPage | i
-  term.str(string("Sending index page",13))
+  'term.str(string("Sending index page",13))
 
   socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
   socket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
@@ -362,6 +371,8 @@ pri indexPage | i
   httpOutputLink(string("/chirp"),string("white button"),string("Chirp"))
   socket.str(string("</p><p>"))
   httpOutputLink(string("/groan"),string("white button"),string("Groan"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/click"),string("white button"),string("Click"))
   socket.str(string("</p>"))
   socket.str(string("<h3>LED</h3>"))
   socket.str(string("<p>"))
@@ -387,5 +398,5 @@ pri indexPage | i
    
   socket.str(string("</body></html>",13,10))
 
-  term.str(string("Index page sent!",13))
+  'term.str(string("Index page sent!",13))
   

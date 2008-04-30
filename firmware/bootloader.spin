@@ -322,6 +322,7 @@ HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
 STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
+CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
 pri httpOutputLink(url,class,content)
   websocket.str(string("<a href='"))
@@ -445,6 +446,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
       elseif strcomp(@httpPath,string("/reboot"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("REBOOTING",13,10))
         websocket.close
@@ -453,12 +455,14 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
       elseif strcomp(@httpPath,string("/irtest"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
         websocket.str(@CR_LF)
         subsys.irTest
         websocket.str(string("Status LED should now blink on IR activity.",13,10))
       elseif strcomp(@httpPath,string("/stage2"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("BOOTING STAGE 2",13,10))
         websocket.close
@@ -558,6 +562,17 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
             quit
           repeat j from 0 to 127
             websocket.tx(buffer[j])
+      elseif strcomp(@httpPath,@CONFIG_PLIST_FILE)
+        ifnot authorized
+          httpUnauthorized
+          websocket.close
+          next
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        'websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("text/x-plist"))        
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.plist"))        
+        websocket.str(@CR_LF)
+        configPList
       else           
         httpNotFound
     elseif strcomp(@httpMethod,string("PUT"))
@@ -587,8 +602,8 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           websocket.str(@CR_LF)
         else
           if strcomp(@httpQuery,string("boot")) OR stage_two
-            websocket.str(@HTTP_303)
-            websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+            websocket.str(@HTTP_200)
+            websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
             websocket.str(@CR_LF)
             if stage_two
@@ -649,6 +664,27 @@ pub infoPage | i
   websocket.str(string("ybox.ina = "))
   websocket.dec(ina)
   websocket.tx(10)
+PRI configPList | key,ptr,printable
+'' Outputs all of the current settings as a property list
+  key:=settings.firstKey
+  websocket.str(string("{",10,"    /* ybox2 configuration plist */",10))
+  repeat
+    ifnot key
+      quit
+    if key==$1010
+      next
+    websocket.str(string("    "))
+    websocket.dec(key)
+    websocket.str(string(" = <"))
+    repeat settings.getData(key,(ptr:=@buffer),128)
+      websocket.hex(byte[ptr++],2)
+    websocket.str(string(">;",10))
+
+  while (key:=settings.nextKey(key))
+  websocket.str(string("}",10))
+
+
+
 pub beginInfo
     websocket.str(string("<div><tt>"))
 pub endInfo
@@ -698,9 +734,7 @@ pub indexPage(authorized) | i
   websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
   websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
   websocket.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
-
  
-
   websocket.str(string("</head><body><h1>"))
   websocket.str(@productName)
   websocket.str(string("</h1>"))
@@ -773,6 +807,8 @@ pub indexPage(authorized) | i
   httpOutputLink(@STAGE2_EEPROM_FILE,0,@STAGE2_EEPROM_FILE+1)
   websocket.tx(" ")
   httpOutputLink(@CONFIG_BIN_FILE,0,@CONFIG_BIN_FILE+1)
+  websocket.tx(" ")
+  httpOutputLink(@CONFIG_PLIST_FILE,0,@CONFIG_PLIST_FILE+1)
   endInfo
    
   websocket.str(string("<h2>Other</h2>"))

@@ -528,13 +528,15 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         http.str(@HTTP_CONNECTION_CLOSE)
         http.str(@CR_LF)
-        http.str(string("<html><head><title>ybox2</title></head><body><h1>"))
+
+        http.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+        http.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
+        http.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
+ 
+        http.str(string("</head><body><h1>"))
         http.str(@productName)
-        http.str(string("</h1><hr />"))
-        http.str(string("<h2>Info</h2>"))
-        'repeat i from settings#SettingsBottom to settings#SettingsTop-1
-        '  http.hex(BYTE[i],2)
-        '  http.tx(" ")
+        http.str(string("</h1>"))
+
         if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
           http.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
@@ -542,23 +544,7 @@ pub httpServer | char, i, lineLength,contentSize,authorized
               http.tx("-")
             http.hex(byte[@httpMethod][i],2)
           http.str(string("</tt></div>"))
-        if settings.getData(settings#MISC_UUID,@httpQuery,16)
-          http.str(string("<div><tt>UUID: "))
-          repeat i from 0 to 3
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 4 to 5
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 6 to 7
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 8 to 9
-            http.hex(byte[@httpQuery][i],2)
-          http.tx("-")
-          repeat i from 10 to 15
-            http.hex(byte[@httpQuery][i],2)
-          http.str(string("</tt></div>"))
+
         http.str(string("<div><tt>Uptime: "))
         http.dec(subsys.RTC/60)
         http.tx("m")

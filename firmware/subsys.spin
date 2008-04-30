@@ -109,6 +109,11 @@ pub ChirpSad | i
     delay_ms(17)
   outa[SPKRPin]:=0
 
+pub Click | i
+  outa[SPKRPin]:=1  
+  delay_ms(1)
+  outa[SPKRPin]:=0
+
 PUB StatusSolid(r,g,b)
   StatusOff
   LED_R:=r
