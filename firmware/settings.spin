@@ -31,9 +31,6 @@
         Currently requires a 64KB EEPROM to save things persistantly.
 }} 
 CON
-
-  _clkmode = xtal1 + pll16x
-  _xinfreq = 5_000_000                                                      
   EEPROMPageSize = 128
 
   SettingsSize = $400
@@ -99,18 +96,23 @@ PUB commit | addr, i
     addr+=EEPROMPageSize
   unlock
 
+pri isValidEntry(iter)
+  return (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+pri nextEntry(iter)
+  return iter-(4+((byte[iter-2]+1) & !1))
+
 PUB size | iter
   iter := SettingsTop
-  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
-    iter-=4+((byte[iter-2]+1) & !1)
+  repeat while isValidEntry(iter)
+    iter:=nextEntry(iter)
   return SettingsTop-iter
 
 PRI findKey_(key) | iter
   iter := SettingsTop
-  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+  repeat while isValidEntry(iter)
     if word[iter] == key
       return iter
-    iter-=4+((byte[iter-2]+1) & !1)
+    iter:=nextEntry(iter)
   return 0
 PUB findKey(key) | retVal
   lock
@@ -118,15 +120,14 @@ PUB findKey(key) | retVal
   unlock
   return retVal
 PUB firstKey
-  if word[SettingsTop] AND (byte[SettingsTop-2]==(byte[SettingsTop-3]^$FF))
+  if isValidEntry(SettingsTop)
     return word[SettingsTop]
   return 0
 
 PUB nextKey(key) | iter
   lock
-  iter:=findKey_(key)
-  iter-=4+((byte[iter-2]+1) & !1)
-  if (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
+  iter:=nextEntry(findKey_(key))
+  if isValidEntry(iter)
     key:=word[iter]
   else
     key:=0
@@ -148,8 +149,7 @@ PUB removeKey(key) | iter, nxtKey
   lock
   iter := findKey_(key)
   if iter
-'    nextKey := iter-  3-byte[iter-2]
-    nxtKey := iter-  (4+((byte[iter-2]+1) & !1))
+    nxtKey := nextEntry(iter)
     bytemove(SettingsBottom+iter-nxtKey,SettingsBottom, nxtKey-SettingsBottom+1)
   unlock
   return iter
@@ -159,8 +159,8 @@ PUB setData(key,ptr,size_) | iter
   iter := SettingsTop
   if size_>255
     abort FALSE
-  repeat while (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
-    iter-=4+((byte[iter-2]+1) & !1)
+  repeat while isValidEntry(iter)
+    iter:=nextEntry(iter)
   if iter-3-size_<SettingsBottom
     unlock
     abort FALSE

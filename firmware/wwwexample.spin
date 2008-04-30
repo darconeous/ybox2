@@ -12,9 +12,9 @@ OBJ
   subsys        : "subsys"
   settings      : "settings"
   numbers       : "numbers"
-  socket       : "api_telnet_serial"
-  http         : "http"
-                                     
+  socket        : "api_telnet_serial"
+  http          : "http"
+  base64        : "base64"                                   
 VAR
   long stack[100] 
   byte stage_two
@@ -29,7 +29,7 @@ PUB init | i
   outa[0]:=0
   dira[0]:=1
   dira[subsys#SPKRPin]:=1
-
+  
   ' Default to NTSC
   tv_mode:=term#MODE_NTSC
   
@@ -122,8 +122,12 @@ PUB init | i
 
   subsys.StatusIdle
  
-  httpServer
-
+  repeat
+    i:=\httpServer
+    term.str(string("HTTP SERVER EXCEPTION "))
+    term.dec(i)
+    term.out(13)
+    
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
@@ -138,6 +142,7 @@ VAR
   byte httpQuery[64]
   byte httpHeader[32]
   byte buffer[128]
+  byte buffer2[128]
 
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
@@ -146,41 +151,77 @@ HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
 HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
 HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
 HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
+HTTP_401      BYTE      "HTTP/1.1 401 Authorization Required",13,10,0
 
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
+pri httpUnauthorized
+  socket.str(@HTTP_401)
+  socket.str(@HTTP_CONNECTION_CLOSE)
+  socket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  socket.str(@CR_LF)
+  socket.str(@HTTP_401)
 
-pub httpServer | char, i, lineLength,contentLength
+pub httpServer | char, i, lineLength,contentLength,authorized
 
   repeat
+    term.str(string("Prepping...",13))
     repeat while \socket.listen(80) == -1
+      term.str(string("Unable to listen!",13))
       if ina[subsys#BTTNPin]
         reboot
       delay_ms(1000)
       socket.closeall
       next
+    term.str(string("Waiting",13))
     socket.resetBuffers
     repeat while NOT socket.isConnected
       socket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
 
+    ' If there isn't a password set, then we are by default "authorized"
+    authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
+    term.str(string("Connected",13))
+
+    'repeat while socket.isConnected
+    '  term.out(socket.rxtime(1000))
+    
     http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
+    term.str(string("Parsed Request",13))
     
     contentLength:=0
     repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
       if strcomp(@httpHeader,string("Content-Length"))
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
+      elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+        ' Skip past the word "Basic"
+        repeat i from 0 to 7
+          if buffer[i]==" "
+            i++
+            quit
+          if buffer[i]==0
+            quit
+        base64.inplaceDecode(@buffer+i)  
+        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
+        authorized:=strcomp(@buffer+i,@buffer2)
+
+    term.str(string("Parsed Headers",13))
                
     if strcomp(@httpMethod,string("GET"))
       hits++
       if strcomp(@httpPath,string("/"))
+        term.str(string("Index Page",13))
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONTENT_TYPE_HTML)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         indexPage
       elseif strcomp(@httpPath,string("/reboot"))
+        ifnot authorized
+          httpUnauthorized
+          socket.close
+          next
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
@@ -247,55 +288,59 @@ pub httpServer | char, i, lineLength,contentLength
         subsys.irTest
         socket.str(string("OK",13,10))
       else           
+        term.str(string("404",13))
         socket.str(@HTTP_404)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         socket.str(@HTTP_404)
     else
-        socket.str(@HTTP_501)
-        socket.str(@HTTP_CONNECTION_CLOSE)
-        socket.str(@CR_LF)
-        socket.str(@HTTP_501)
-    
+      term.str(string("501",13))
+      socket.str(@HTTP_501)
+      socket.str(@HTTP_CONNECTION_CLOSE)
+      socket.str(@CR_LF)
+      socket.str(@HTTP_501)
+       
     socket.close
 
 
+pri httpOutputLink(url,class,content)
+  socket.str(string("<a href='"))
+  socket.strxml(url)
+  if class
+    socket.str(string("' class='"))
+    socket.strxml(class)
+  socket.str(string("'>"))
+  socket.str(content)
+  socket.str(string("</a>"))
 
 pri indexPage | i
-  socket.str(string("<html><head><title>ybox2</title></head><body><h1>"))
+  term.str(string("Sending index page",13))
+
+  socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+  socket.str(string("<link rel='stylesheet' href='http://www.uscity.net/iphone/iPhoneButtons.css' />"))
+  socket.str(string("<style>body { margin: 8px; background-color: rgb(197,204,211); font-family: Helvetica; } .button { width: 240px; } h1 { text-align: center; } h2 { color: rgb(76,86,108); }</style>"))
+  socket.str(string("</head><body><h1>"))
   socket.str(@productName)
-  socket.str(string("</h1><hr />"))
-  socket.str(string("<h2>Info</h2>"))
+  socket.str(string("</h1>"))
   if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
     socket.str(string("<div><tt>MAC: "))
     repeat i from 0 to 5
       if i
-        socket.tx("-")
+        socket.tx(":")
       socket.hex(byte[@httpMethod][i],2)
     socket.str(string("</tt></div>"))
-  if settings.getData(settings#MISC_UUID,@httpQuery,16)
-    socket.str(string("<div><tt>UUID: "))
-    repeat i from 0 to 3
-      socket.hex(byte[@httpQuery][i],2)
-    socket.tx("-")
-    repeat i from 4 to 5
-      socket.hex(byte[@httpQuery][i],2)
-    socket.tx("-")
-    repeat i from 6 to 7
-      socket.hex(byte[@httpQuery][i],2)
-    socket.tx("-")
-    repeat i from 8 to 9
-      socket.hex(byte[@httpQuery][i],2)
-    socket.tx("-")
-    repeat i from 10 to 15
-      socket.hex(byte[@httpQuery][i],2)
-    socket.str(string("</tt></div>"))
   socket.str(string("<div><tt>Uptime: "))
-  socket.dec(subsys.RTC)
+  socket.dec(subsys.RTC/3600)
+  socket.tx("h")
+  socket.dec(subsys.RTC/60//60)
+  socket.tx("m")
+  socket.dec(subsys.RTC//60)
+  socket.tx("s")
   socket.str(string("</tt></div>"))
-  socket.str(string("<div><tt>Hits since last reboot: "))
+  socket.str(string("<div><tt>Hits: "))
   socket.dec(hits)
   socket.str(string("</tt></div>"))
+  {
   socket.str(string("<div><tt>INA: "))
   repeat i from 0 to 7
     socket.dec(ina[i])
@@ -309,15 +354,38 @@ pri indexPage | i
   repeat i from 23 to 31
     socket.dec(ina[i])          
   socket.str(string("</tt></div>"))
+  }
    
   socket.str(string("<h2>Actions</h2>"))
-  socket.str(string("<div>Noise: <a href='/chirp'>Chirp</a> | <a href='/groan'>Groan</a></div>"))
-  socket.str(string("<div>LED: <a href='/led?ff0000'>Red</a> | <a href='/led?00ff00'>Green</a> | <a href='/led?ffff00'>Yellow</a> | <a href='/led?0000ff'>Blue</a> | <a href='/led_rainbow'>Rainbow</a> | <a href='/irtest'>irtest</a></div>"))
-  socket.str(string("<div>Other: <a href='/reboot'>Reboot</a></div>"))
+  socket.str(string("<h3>Noise</h3>"))
+  socket.str(string("<p>"))
+  httpOutputLink(string("/chirp"),string("white button"),string("Chirp"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/groan"),string("white button"),string("Groan"))
+  socket.str(string("</p>"))
+  socket.str(string("<h3>LED</h3>"))
+  socket.str(string("<p>"))
+  httpOutputLink(string("/led?ff0000"),string("white button"),string("Red"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/led?ffff00"),string("white button"),string("Yellow"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/led?00ff00"),string("white button"),string("Green"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/led?0000ff"),string("white button"),string("Blue"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/led_rainbow"),string("white button"),string("Rainbow"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/irtest"),string("white button"),string("IR Test"))
+  socket.str(string("</p>"))
+  socket.str(string("<h3>System</h3>"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("/reboot"),string("black button"),string("Reboot"))
+  socket.str(string("</p>"))
+  
   socket.str(string("<h2>Other</h2>"))
-  socket.str(string("<div><a href='"))
-  socket.str(@productURL)
-  socket.str(string("'>More info</a></div>"))
+  httpOutputLink(@productURL,0,@productURL)
    
   socket.str(string("</body></html>",13,10))
+
+  term.str(string("Index page sent!",13))
   

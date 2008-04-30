@@ -323,9 +323,12 @@ RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
 STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 
-pri httpOutputLink(url,content)
+pri httpOutputLink(url,class,content)
   websocket.str(string("<a href='"))
   websocket.strxml(url)
+  if class
+    websocket.str(string("' class='"))
+    websocket.strxml(class)
   websocket.str(string("'>"))
   websocket.str(content)
   websocket.str(string("</a>"))
@@ -453,7 +456,6 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@CR_LF)
         subsys.irTest
         websocket.str(string("Status LED should now blink on IR activity.",13,10))
-        websocket.close
       elseif strcomp(@httpPath,string("/stage2"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
@@ -508,29 +510,6 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           websocket.str(string("DISABLED",13,10))
-      elseif strcomp(@httpPath,string("/tvmode"))
-        ifnot authorized
-          httpUnauthorized
-          websocket.close
-          next
-        websocket.str(@HTTP_303)
-        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-        websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.str(@CR_LF)
-        if httpQuery[0]=="1"
-          settings.removeKey($1010)
-          settings.setByte(settings#MISC_TV_MODE,term#MODE_PAL)
-          settings.commit
-          term.stop
-          term.startWithMode(12,term#MODE_PAL)
-          websocket.str(string("PAL",13,10))
-        else
-          settings.removeKey($1010)
-          settings.setByte(settings#MISC_TV_MODE,term#MODE_NTSC)
-          settings.commit
-          term.stop
-          term.startWithMode(12,term#MODE_NTSC)
-          websocket.str(string("NTSC",13,10))
       elseif strcomp(@httpPath,RAMIMAGE_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
@@ -664,112 +643,147 @@ pub infoPage | i
       websocket.hex(byte[@httpQuery][i],2)
     websocket.str(string("'",10))
     
-  websocket.str(string("ybox.rtc = "))
+  websocket.str(string("ybox.uptime = "))
   websocket.dec(subsys.RTC)
   websocket.tx(10)
   websocket.str(string("ybox.ina = "))
   websocket.dec(ina)
   websocket.tx(10)
+pub beginInfo
+    websocket.str(string("<div><tt>"))
+pub endInfo
+    websocket.str(string("</tt></div>"))
 
-
+pub beginForm(action,method)
+  websocket.str(string("<form action='"))
+  websocket.str(action)
+  websocket.str(string("' method='"))
+  websocket.str(method)
+  websocket.str(string("'>"))
+pub endForm
+  websocket.str(string("</form>"))
+pub addTextField(id,label,value,length)
+  websocket.str(string("<div><label for='"))
+  websocket.str(id)
+  websocket.str(string("'>"))
+  websocket.str(label)
+  websocket.str(string(":</label><input name='"))
+  websocket.str(id)
+  websocket.str(string("' id='"))
+  websocket.str(id)
+  websocket.str(string("' size='"))
+  websocket.dec(length)
+  websocket.str(string("' value='"))
+  websocket.strxml(value)
+  websocket.str(string("' /></div>"))
+pub addPasswordField(id,label,value,length)
+  websocket.str(string("<div><label for='"))
+  websocket.str(id)
+  websocket.str(string("'>"))
+  websocket.str(label)
+  websocket.str(string(":</label><input type='password' name='"))
+  websocket.str(id)
+  websocket.str(string("' id='"))
+  websocket.str(id)
+  websocket.str(string("' size='"))
+  websocket.dec(length)
+  if value
+    websocket.str(string("' value='"))
+    websocket.strxml(value)
+  websocket.str(string("' /></div>"))
+pub addSubmitButton
+  websocket.str(string("<input type='submit' />"))
+  
 pub indexPage(authorized) | i
-  websocket.str(string("<html><body><h1>"))
+  websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+  websocket.str(string("<link rel='stylesheet' href='http://www.uscity.net/iphone/iPhoneButtons.css' />"))
+  websocket.str(string("<style>body { margin: 8px; background-color: rgb(197,204,211); font-family: Helvetica; } .button { width: 240px; } h1 { text-align: center; } h2 { color: rgb(76,86,108); }</style>"))
+
+ 
+
+  websocket.str(string("</head><body><h1>"))
   websocket.str(@productName)
-  websocket.str(string("</h1><hr />"))
-  websocket.str(string("<h2>Info</h2>"))
+  websocket.str(string("</h1>"))
+
   if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
-    websocket.str(string("<div><tt>MAC: "))
+    beginInfo
+    websocket.str(string("MAC: "))
     repeat i from 0 to 5
       if i
         websocket.tx("-")
       websocket.hex(byte[@httpMethod][i],2)
-    websocket.str(string("</tt></div>"))
-  if settings.getData(settings#MISC_UUID,@httpMethod,16)
-    websocket.str(string("<div><tt>UUID: "))
-    repeat i from 0 to 3
-      websocket.hex(byte[@httpMethod][i],2)
-    websocket.tx("-")
-    repeat i from 4 to 5
-      websocket.hex(byte[@httpMethod][i],2)
-    websocket.tx("-")
-    repeat i from 6 to 7
-      websocket.hex(byte[@httpMethod][i],2)
-    websocket.tx("-")
-    repeat i from 8 to 9
-      websocket.hex(byte[@httpMethod][i],2)
-    websocket.tx("-")
-    repeat i from 10 to 15
-      websocket.hex(byte[@httpMethod][i],2)
-    websocket.str(string("</tt></div>"))
-  websocket.str(string("<div><tt>Uptime: "))
-  websocket.dec(subsys.RTC)
-  websocket.str(string("</tt></div>"))
+    endInfo
+
+  beginInfo
+  websocket.str(string("Uptime: "))
+  websocket.dec(subsys.RTC/3600)
+  websocket.tx("h")
+  websocket.dec(subsys.RTC/60//60)
+  websocket.tx("m")
+  websocket.dec(subsys.RTC//60)
+  websocket.tx("s")
+  endInfo
    
-  websocket.str(string("<div><tt>Autoboot: "))
+  beginInfo
+  websocket.str(string("Autoboot: "))
   if settings.findKey(settings#MISC_AUTOBOOT)  
     websocket.str(string("<b>ON</b> "))
     if authorized
-      httpOutputLink(string("/autoboot?0"),string("disable"))
+      httpOutputLink(string("/autoboot?0"),0,string("disable"))
   else
     websocket.str(string("<b>OFF</b> "))
     if authorized
-      httpOutputLink(string("/autoboot?1"),string("enable"))
-  websocket.str(string("</tt></div>"))
+      httpOutputLink(string("/autoboot?1"),0,string("enable"))
+  endInfo
    
-  websocket.str(string("<div><tt>Password: "))
+  beginInfo
+  websocket.str(string("Password: "))
   if settings.findKey(settings#MISC_PASSWORD)
     websocket.str(string("SET"))  
   else
     websocket.str(string("NOT SET"))  
-  websocket.str(string("</tt></div>"))
+  endInfo
    
    
   if authorized
-    websocket.str(string("<form action='\password' method='POST'>"))
-    websocket.str(string("<div><label for='username'>Username:</label><input name='username' id='username' size='32' value='"))
-    websocket.strxml(string("admin"))
-    websocket.str(string("' /></div>"))
-    websocket.str(string("<div><label for='pwd1'>Password:</label><input name='pwd1' id='pwd1' type='password' size='32' /></div>"))
-    websocket.str(string("<div><label for='pwd2'>Password:</label><input name='pwd2' id='pwd2' type='password' size='32' /></div>"))
-     
-    websocket.str(string("<input type='submit' />"))
-    websocket.str(string("</form>"))
-     
-   
-   
+    beginForm(string("\password"),string("POST"))
+    addTextField(string("username"),string("Username"),string("admin"),32)
+    addPasswordField(string("pwd1"),string("Password"),0,32)
+    addPasswordField(string("pwd2"),string("Password"),0,32)
+    addSubmitButton 
+    endForm
    
   websocket.str(string("<h2>Actions</h2>"))
-  websocket.str(string("<div>"))
-  httpOutputLink(string("/reboot"),string("Reboot"))
-  websocket.tx(" ")
-  httpOutputLink(string("/stage2"),string("Boot stage 2"))
-  websocket.tx(" ")
-  httpOutputLink(string("/irtest"),string("IR Test Mode"))
+  websocket.str(string("<p>"))
+  httpOutputLink(string("/stage2"),string("white button"),string("Boot stage 2"))
+  websocket.str(string("</p><p>"))
+  httpOutputLink(string("/irtest"),string("blue button"),string("IR Test Mode"))
+  websocket.str(string("</p><p>"))
+  httpOutputLink(string("/reboot"),string("black button"),string("Reboot"))
   ifnot authorized
-    websocket.tx(" ")
-    httpOutputLink(string("/login"),string("Login"))
-  websocket.str(string("</div>"))
+    websocket.str(string("</p><p>"))
+    httpOutputLink(string("/login"),string("blackRight button"),string("Login"))
+  websocket.str(string("</p>"))
    
    
   websocket.str(string("<h2>Files</h2>"))
-  websocket.str(string("<div>"))
-  httpOutputLink(@RAMIMAGE_EEPROM_FILE,@RAMIMAGE_EEPROM_FILE+1)
+  beginInfo
+  httpOutputLink(@RAMIMAGE_EEPROM_FILE,0,@RAMIMAGE_EEPROM_FILE+1)
   websocket.tx(" ")
-  httpOutputLink(@STAGE2_EEPROM_FILE,@STAGE2_EEPROM_FILE+1)
+  httpOutputLink(@STAGE2_EEPROM_FILE,0,@STAGE2_EEPROM_FILE+1)
   websocket.tx(" ")
-  httpOutputLink(@CONFIG_BIN_FILE,@CONFIG_BIN_FILE+1)
-  websocket.str(string("</div>"))
+  httpOutputLink(@CONFIG_BIN_FILE,0,@CONFIG_BIN_FILE+1)
+  endInfo
    
   websocket.str(string("<h2>Other</h2>"))
-  websocket.str(string("<div>"))
-  httpOutputLink(@productURL,@productURL)
-  websocket.str(string("</div>"))
-  websocket.str(string("<div>"))
-  httpOutputLink(@productURL2,@productURL2)
-  websocket.str(string("</div>"))
-  websocket.str(string("</body></html>",13,10))
-   
+  beginInfo
+  httpOutputLink(@productURL,0,@productURL)
+  endInfo
+  beginInfo
+  httpOutputLink(@productURL2,0,@productURL2)
+  endInfo
 
+  websocket.str(string("</body></html>",13,10))
 
 pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j
   eeprom.Initialize(eeprom#BootPin)
@@ -1073,17 +1087,17 @@ delay5_ret              ret                             '1
 '
 ' Constants
 '
-mask_rx                 long    $80000000
-mask_tx                 long    $40000000
+'mask_rx                 long    $80000000
+'mask_tx                 long    $40000000
 mask_sda                long    $20000000
 mask_scl                long    $10000000
-time                    long    150 * 20000 / 4 / 2     '150ms (@20MHz, 2 inst/loop)
-time_load               long    100 * 20000 / 4 / 2     '100ms (@20MHz, 2 inst/loop)
+'time                    long    150 * 20000 / 4 / 2     '150ms (@20MHz, 2 inst/loop)
+'time_load               long    100 * 20000 / 4 / 2     '100ms (@20MHz, 2 inst/loop)
 time_xtal               long    20 * 20000 / 4 / 1      '20ms (@20MHz, 1 inst/loop)
-lfsr                    long    "P"
+'lfsr                    long    "P"
 zero                    long    0
 smode                   long    0
-hFFF9FFFF               long    $FFF9FFFF
+'hFFF9FFFF               long    $FFF9FFFF
 h8000                   long    $8000
 programsize             long    $8000-settings#SettingsSize
 interpreter             long    $0001 << 18 + $3C01 << 4 + %0000
@@ -1097,6 +1111,6 @@ raddress                res     1
 count                   res     1
 bits                    res     1
 eedata                  res     1
-rxdata                  res     1
-delta                   res     1
-threshold               res     1
+'rxdata                  res     1
+'delta                   res     1
+'threshold               res     1

@@ -1,4 +1,5 @@
 obj
+'  tcp : "shove"
   tcp : "driver_socket"
 pub getFieldFromQuery(packeddataptr,keystring,outvalue,outsize) | i,char
   i:=0
