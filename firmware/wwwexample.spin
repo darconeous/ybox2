@@ -34,10 +34,9 @@ PUB init | i
   tv_mode:=term#MODE_NTSC
   
   hits:=0
-  
   settings.start
   numbers.init
-
+  
   ' If you aren't using this thru the bootloader, set your
   ' settings here. 
   {

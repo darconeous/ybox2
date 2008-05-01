@@ -5,6 +5,19 @@
         This file handles the RGB LED, the piezo speaker, and the
         button watchdog.
         Also includes a RTC.
+
+
+        LED Conf settings
+
+        bit 0-4: Red LED Pin
+        bit 5-7: Red LED attenuation
+        bit 8-12: Green LED Pin
+        bit 13-15: Green LED attenuation
+        bit 16-20: Blue LED Pin
+        bit 21-23: Blue LED attenuation
+        bit 24 :  0 = common cathode, 1 = comon anode
+        
+
 }} 
 CON
   _clkmode = xtal1 + pll16x
@@ -33,10 +46,13 @@ PUB init | LED_Conf
   if settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
     ' We have custom LED settings!
     ' Update the LED masks
-    LEDRMask:=1<<BYTE[@LED_Conf][0]
-    LEDGMask:=1<<BYTE[@LED_Conf][1]
-    LEDBMask:=1<<BYTE[@LED_Conf][2]
-    if BYTE[@LED_Conf][3]
+    LEDBMask:=1<<((LED_Conf>>16)&%11111)
+    LEDBBright-=(LED_Conf>>21)&%111
+    LEDGMask:=1<<((LED_Conf>>8) & %11111)
+    LEDGBright-=(LED_Conf>>13) & %111
+    LEDRMask:=1<<(LED_Conf & %11111)
+    LEDRBright-=(LED_Conf>>5) & %111
+    if LED_Conf&(1<<24)
       LEDRJmp ^= %1111_000000000_000000000 ' Invert Red output
       LEDGJmp ^= %1111_000000000_000000000 ' Invert Green Output
       LEDBJmp ^= %1111_000000000_000000000 ' Invert Blue Output
@@ -210,7 +226,7 @@ loop
 LEDDutyLoop
 
               rdbyte T1,LEDRDutyPtr
-              shl T1,LEDBright
+              shl T1,LEDRBright
               add LEDRP,T1 wc
 LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
 '        if_nc jmp #:LEDROff
@@ -221,7 +237,7 @@ LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
 :LEDRDone              
 
               rdbyte T1,LEDGDutyPtr
-              shl T1,LEDBright
+              shl T1,LEDGBright
               add LEDGP,T1 wc
 LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
 '        if_nc jmp #:LEDGOff
@@ -232,7 +248,7 @@ LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
 :LEDGDone              
 
               rdbyte T1,LEDBDutyPtr
-              shl T1,LEDBright
+              shl T1,LEDBBright
               add LEDBP,T1 wc
 LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
 '        if_nc jmp #:LEDBOff
@@ -256,7 +272,9 @@ LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
               jmp #loop
               
 
-LEDBright     long 16+LED_Brightness
+LEDRBright     long 16+LED_Brightness
+LEDGBright     long 16+LED_Brightness
+LEDBBright     long 16+LED_Brightness
 LEDRMask      long (1 << LED_RPin)
 LEDGMask      long (1 << LED_GPin)
 LEDBMask      long (1 << LED_BPin)

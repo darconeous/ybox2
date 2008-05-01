@@ -164,7 +164,7 @@ PUB init | i, tv_mode
   repeat
     \httpServer
     term.str(string("WEBSERVER EXCEPTION",13))
-PRI resetSettings | key, nextKey
+PRI resetSettings | key, nextKey, ledconf
 '' Preforms a "factory reset" by removing all
 '' settings except those used for device identification
 '' and hardware configuration.
@@ -176,7 +176,13 @@ PRI resetSettings | key, nextKey
     case key
       settings#NET_MAC_ADDR:   ' Preserve MAC Address
       settings#MISC_UUID:      ' Preserve UUID
-      settings#MISC_LED_CONF:  ' Preserve LED Configuration
+      settings#MISC_LED_CONF:  ' Preserve LED Configuration ONLY if it is sane
+        if settings.getData(key,@ledconf,4) < 4
+          ' If we are less than the expected size, kill it
+          settings.removeKey(key)
+        elseif ((ledconf>>16)&%11111) < 8 OR ((ledconf>>8)&%11111) < 8 OR (ledconf&%11111) < 8
+          ' Make sure no pin assignments are less than 8
+          settings.removeKey(key)
       other: settings.removeKey(key)
   while (key:=nextKey)
 
@@ -667,7 +673,7 @@ pub infoPage | i
 PRI configPList | key,ptr,printable
 '' Outputs all of the current settings as a property list
   key:=settings.firstKey
-  websocket.str(string("{",10,"    /* ybox2 configuration plist */",10))
+  websocket.str(string("{",10))
   repeat
     ifnot key
       quit
@@ -739,6 +745,9 @@ pub indexPage(authorized) | i
   websocket.str(@productName)
   websocket.str(string("</h1>"))
 
+  if stage_two
+    websocket.str(string("<center><small>Bootloader Upgrade - Stage Two</small></center>"))
+
   if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
     beginInfo
     websocket.str(string("MAC: "))
@@ -758,43 +767,45 @@ pub indexPage(authorized) | i
   websocket.tx("s")
   endInfo
    
-  beginInfo
-  websocket.str(string("Autoboot: "))
-  if settings.findKey(settings#MISC_AUTOBOOT)  
-    websocket.str(string("<b>ON</b> "))
+  ifnot stage_two
+    beginInfo
+    websocket.str(string("Autoboot: "))
+    if settings.findKey(settings#MISC_AUTOBOOT)  
+      websocket.str(string("<b>ON</b> "))
+      if authorized
+        httpOutputLink(string("/autoboot?0"),0,string("disable"))
+    else
+      websocket.str(string("<b>OFF</b> "))
+      if authorized
+        httpOutputLink(string("/autoboot?1"),0,string("enable"))
+    endInfo
+     
+    beginInfo
+    websocket.str(string("Password: "))
+    if settings.findKey(settings#MISC_PASSWORD)
+      websocket.str(string("SET"))  
+    else
+      websocket.str(string("NOT SET"))  
+    endInfo
+     
+     
     if authorized
-      httpOutputLink(string("/autoboot?0"),0,string("disable"))
-  else
-    websocket.str(string("<b>OFF</b> "))
-    if authorized
-      httpOutputLink(string("/autoboot?1"),0,string("enable"))
-  endInfo
-   
-  beginInfo
-  websocket.str(string("Password: "))
-  if settings.findKey(settings#MISC_PASSWORD)
-    websocket.str(string("SET"))  
-  else
-    websocket.str(string("NOT SET"))  
-  endInfo
-   
-   
-  if authorized
-    beginForm(string("\password"),string("POST"))
-    addTextField(string("username"),string("Username"),string("admin"),32)
-    addPasswordField(string("pwd1"),string("Password"),0,32)
-    addPasswordField(string("pwd2"),string("Password"),0,32)
-    addSubmitButton 
-    endForm
-   
+      beginForm(string("\password"),string("POST"))
+      addTextField(string("username"),string("Username"),string("admin"),32)
+      addPasswordField(string("pwd1"),string("Password"),0,32)
+      addPasswordField(string("pwd2"),string("Password"),0,32)
+      addSubmitButton 
+      endForm
+     
   websocket.str(string("<h2>Actions</h2>"))
   websocket.str(string("<p>"))
-  httpOutputLink(string("/stage2"),string("white button"),string("Boot stage 2"))
-  websocket.str(string("</p><p>"))
-  httpOutputLink(string("/irtest"),string("blue button"),string("IR Test Mode"))
-  websocket.str(string("</p><p>"))
+  ifnot stage_two
+    httpOutputLink(string("/stage2"),string("white button"),string("Boot stage 2"))
+    websocket.str(string("</p><p>"))
+    httpOutputLink(string("/irtest"),string("blue button"),string("IR Test Mode"))
+    websocket.str(string("</p><p>"))
   httpOutputLink(string("/reboot"),string("black button"),string("Reboot"))
-  ifnot authorized
+  if not authorized AND not stage_two
     websocket.str(string("</p><p>"))
     httpOutputLink(string("/login"),string("blackRight button"),string("Login"))
   websocket.str(string("</p>"))

@@ -1,6 +1,8 @@
 {{
   Generic Multi-Queue System
   Robert Quattlebaum <darco@deepdarc.com>
+
+  NOTE: Not yet stable for multi-threaded use!
 }}
 CON
   Q_PAGES =      80 ' Must be less than 127
