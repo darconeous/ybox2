@@ -1126,9 +1126,7 @@ PRI dhcp_offer_response | i, ptr
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(DHCP_PORT_SERVER,DHCP_PORT_CLIENT,0)
 
-  ip_dhcp_xid++
-  
-  compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,conv_endianword(word[pkt+DHCP_secs]),pkt+DHCP_yiaddr,pkt+DHCP_yiaddr,pkt+DHCP_siaddr,pkt+DHCP_giaddr)
+  compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,conv_endianword(word[pkt+DHCP_secs]),@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
   nic.wr_frame($63)
