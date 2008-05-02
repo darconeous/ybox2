@@ -155,7 +155,7 @@ PUB init | i, tv_mode
     term.out(13)  
 
   if stage_two
-    subsys.StatusSolid(255,255,255)
+    subsys.FadeToColor(255,255,255,200)
     term.str(string("BOOTLOADER UPGRADE",13,"STAGE TWO",13))
   else
     subsys.StatusIdle
@@ -193,10 +193,11 @@ PRI boot_stage2 | i
  
   outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
 
-  ' Very aggressively shut down every other COG except our own.
+  ' Very aggressively shut down everything except our own cog
   repeat i from 0 to 7
     if cogid<>i
       cogstop(i)
+    lockret(i)
 
   ' Replace this cog with the bootloader
   coginit(0,@bootstage2,0)
@@ -832,11 +833,12 @@ pub indexPage(authorized) | i
 
   websocket.str(string("</body></html>",13,10))
 
-pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j
+pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j, isFading
   eeprom.Initialize(eeprom#BootPin)
 
   i:=0
   total:=0
+  isFading:=0
   
   if stage_two
     addr:=$0000 ' Stage two writes to the lower 32KB
@@ -848,11 +850,12 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
    
   repeat
     if (in := websocket.rxcheck) => 0
-      subsys.StatusSolid(0,128,0)
+      isFading:=0
+      subsys.StatusSolid(0,255,0)
       buffer[i++] := in
       if i == 128
         ' flush to EEPROM                              
-        subsys.StatusSolid(0,0,128)
+        subsys.StatusSolid(0,0,255)
         if stage_two
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
@@ -873,7 +876,9 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
       if total => $8000-settings#SettingsSize
         websocket.close
     else
-      subsys.StatusSolid(128,0,0)
+      ifnot isFading
+        subsys.FadeToColor(255,0,0,500)
+        isFading:=1
       if websocket.isEOF OR (total+i) => contentLength
         if stage_two
           ' Do we have the correct number of bytes?
@@ -941,7 +946,7 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
         term.dec(total)
         term.str(string(" bytes written",13))
         subsys.chirpHappy
-        subsys.StatusSolid(0,255,0)
+        subsys.FadeToColor(0,255,0,200)
         settings.setWord($1010,total)
         return 0
 

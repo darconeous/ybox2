@@ -41,7 +41,7 @@ subsyscog byte 0
 OBJ
   settings      : "settings"
 VAR
-  long stack[16] 'Stack space for new cog
+  long stack[20] 'Stack space for new cog
 PUB init | LED_Conf
   if settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
     ' We have custom LED settings!
@@ -111,6 +111,23 @@ PUB StatusError
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
+PUB FadeToColor(rB,gB,bB,dur)
+  StatusOff
+  modecog := cognew(FadeToColorBlocking(rB,gB,bB,dur), @stack) + 1
+PUB FadeToColorBlocking(rB,gB,bB,dur)|i,rA,gA,bA
+  rA:=LED_R
+  gA:=LED_G
+  bA:=LED_B
+  dur:=(1<<15)/(dur*6+1)
+  ifnot dur
+    dur:=1
+  repeat i from 0 to (1<<15) step dur
+    LED_R:=(((rB-rA)*i)>>15)+rA        
+    LED_G:=(((gB-gA)*i)>>15)+gA        
+    LED_B:=(((bB-bA)*i)>>15)+bA        
+  LED_R:=rB
+  LED_G:=gB
+  LED_B:=bB
    
 pub ChirpHappy | i, j
   repeat j from 0 to 2
@@ -136,46 +153,21 @@ PUB StatusSolid(r,g,b)
   LED_G:=g
   LED_B:=b
 PUB FatalErrorCycle
-  LED_R:=0
-  LED_G:=0
-  LED_B:=0
-  repeat while 1
-    repeat LED_R from 0 to 254
-      waitcnt(20_000 + cnt)
-    repeat LED_R from 255 to 1
-      LED_R--
-      waitcnt(20_000 + cnt)
+  repeat
+    FadeToColorBlocking(255,0,0,100)
+    FadeToColorBlocking(0,0,0,100)
   
 PUB LoadingCycle
-  LED_R:=0
-  LED_G:=0
-  LED_B:=0
-  repeat while 1
-    repeat LED_B from 0 to 254
-      waitcnt(100_000 + cnt)
-    repeat LED_B from 255 to 1
-      waitcnt(100_000 + cnt)
+  repeat
+    FadeToColorBlocking(0,0,255,500)
+    FadeToColorBlocking(0,0,0,500)
 
 PUB ColorCycle
+  repeat
+    FadeToColorBlocking(0,255,0,2000)
+    FadeToColorBlocking(255,0,0,2000)
+    FadeToColorBlocking(0,0,255,2000)
 
-  LED_R:=0
-  LED_G:=0
-  LED_B:=0
-  repeat LED_G from 0 to 254
-    waitcnt(400_000 + cnt)
-  repeat while 1
-    repeat while LED_G
-      LED_G--
-      LED_R++
-      waitcnt(400_000 + cnt)
-    repeat while LED_R
-      LED_B++
-      LED_R--
-      waitcnt(400_000 + cnt)
-    repeat while LED_B
-      LED_G++
-      LED_B--
-      waitcnt(400_000 + cnt)
 PUB RTC
   return long[RTCADDR]
       

@@ -267,7 +267,7 @@ pub httpServer | char, i, lineLength,contentLength,authorized
         socket.str(@CR_LF)
         httpQuery[6]:=0
         i:=numbers.FromStr(@httpQuery,numbers#HEX)
-        subsys.statusSolid(byte[@i][2],byte[@i][1],byte[@i][0])
+        subsys.fadeToColor(byte[@i][2],byte[@i][1],byte[@i][0],1000)
         socket.hex(byte[@i][2],2)
         socket.hex(byte[@i][1],2)
         socket.hex(byte[@i][0],2)
