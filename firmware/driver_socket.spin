@@ -1099,6 +1099,15 @@ PRI send_dhcp_request | i, pkt_len
   nic.wr_frame($01)
   nic.wr_frame(DHCP_TYPE_DISCOVER)
 
+  ' DHCP Parameter Request List
+  nic.wr_frame(55)
+  nic.wr_frame(5) ' 5 bytes long
+  nic.wr_frame(1) ' subnet mask
+  nic.wr_frame(3) ' gateway
+  nic.wr_frame(6) ' DNS server
+  nic.wr_frame(23) ' IP maxhops
+  nic.wr_frame(51) ' lease time
+
   ' DHCP Client-ID
   nic.wr_frame(61)
   nic.wr_frame($07)
@@ -1139,12 +1148,6 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame($01)
   nic.wr_frame(DHCP_TYPE_REQUEST)
 
-  ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
-  nic.wr_frame_data(@local_macaddr,6)
-
   ' DHCP Parameter Request List
   nic.wr_frame(55)
   nic.wr_frame(5) ' 5 bytes long
@@ -1153,7 +1156,13 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame(6) ' DNS server
   nic.wr_frame(23) ' IP maxhops
   nic.wr_frame(51) ' lease time
-  
+
+  ' DHCP Client-ID
+  nic.wr_frame(61)
+  nic.wr_frame($07)
+  nic.wr_frame($01)
+  nic.wr_frame_data(@local_macaddr,6)
+
   if long[pkt+DHCP_yiaddr]
     nic.wr_frame(50)
     nic.wr_frame($04)
@@ -1170,6 +1179,14 @@ PRI dhcp_offer_response | i, ptr
         nic.wr_frame(54)
         nic.wr_frame(byte[ptr+1])
         nic.wr_frame_data((ptr+2),byte[ptr+1])
+      51 : ' DHCP Lease Time
+        nic.wr_frame(51)
+        nic.wr_frame(byte[ptr+1])
+        nic.wr_frame_data((ptr+2),byte[ptr+1])
+      12 : ' Hostname
+        nic.wr_frame(12)
+        nic.wr_frame(byte[ptr+1])
+        nic.wr_frame_data((ptr+2),byte[ptr+1])
     if byte[ptr]
       ptr++
       ptr+=byte[ptr]+1
@@ -1179,7 +1196,7 @@ PRI dhcp_offer_response | i, ptr
   ' End of vendor data
   nic.wr_frame($FF)
 
-  nic.wr_frame_pad(35) ' Padding
+  nic.wr_frame_pad(30) ' Padding
 
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
@@ -1217,12 +1234,14 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
             dhcp_offer_response
             ' Lets wait an extra 4 seconds for a reply
             ip_dhcp_next:=LONG[RTCADDR]+4      
-            return
-          if byte[ptr+2]==DHCP_TYPE_NAK
+            ' Had to comment out this return so DHCP would work properly
+            ' with internet sharing on the macosx. Not sure what is wrong.
+            'return
+          elseif byte[ptr+2]==DHCP_TYPE_NAK
             ' Nak'd!
             ip_dhcp_xid++
             return
-          if byte[ptr+2]<>DHCP_TYPE_ACK
+          elseif byte[ptr+2]<>DHCP_TYPE_ACK
             ' If this isn't an ACK, then ignore it.
             return
       if byte[ptr]
