@@ -123,24 +123,24 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
   linkstat:=nic.isLinkUp
 
   if linkstat  
-    dhcp_process
+    \dhcp_process
 
   repeat
     ifnot nic.isLinkUp
       repeat while NOT nic.isLinkUp
-      dhcp_rebind
+      \dhcp_rebind
       
     nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
     if pkt_count > 0
-      service_packet            ' handle packet
+      \service_packet            ' handle packet
 
-    dhcp_process
+    \dhcp_process
     ++i
     
     if has_valid_ip_addr AND i > 2
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
-      tick_tcpsend
+      \tick_tcpsend
       i := 0
 
 PRI service_packet
@@ -1135,6 +1135,8 @@ PRI dhcp_offer_response | i, ptr
   compose_ip_header(PROT_UDP,@bcast_ipaddr,@any_ipaddr)
   compose_udp_header(DHCP_PORT_SERVER,DHCP_PORT_CLIENT,0)
 
+  ip_dhcp_xid++
+  
   compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,conv_endianword(word[pkt+DHCP_secs]),@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
@@ -1232,11 +1234,11 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
         53 : ' DHCP message type
           if byte[ptr+2]==DHCP_TYPE_OFFER
             dhcp_offer_response
-            ' Lets wait an extra 4 seconds for a reply
-            ip_dhcp_next:=LONG[RTCADDR]+4      
+            ' Lets wait extra time
+            ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
             ' Had to comment out this return so DHCP would work properly
             ' with internet sharing on the macosx. Not sure what is wrong.
-            'return
+            return
           elseif byte[ptr+2]==DHCP_TYPE_NAK
             ' Nak'd!
             ip_dhcp_xid++
