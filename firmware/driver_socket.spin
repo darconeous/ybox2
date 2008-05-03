@@ -1238,7 +1238,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
             ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
             ' Had to comment out this return so DHCP would work properly
             ' with internet sharing on the macosx. Not sure what is wrong.
-            return
+            'return
           elseif byte[ptr+2]==DHCP_TYPE_NAK
             ' Nak'd!
             ip_dhcp_xid++
