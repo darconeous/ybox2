@@ -96,11 +96,11 @@ PUB init | i
     waitcnt(clkfreq*10000 + cnt)
     reboot
 
-  subsys.chirpHappy
-
   if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
     term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
+      if ina[subsys#BTTNPin]
+        reboot
       delay_ms(500)
   term.out($0A)
   term.out($00)  
@@ -120,6 +120,7 @@ PUB init | i
     term.out(13)  
 
   subsys.StatusIdle
+  subsys.chirpHappy
  
   repeat
     i:=\httpServer

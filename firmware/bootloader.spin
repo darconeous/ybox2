@@ -84,7 +84,7 @@ PUB init | i, tv_mode
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
       subsys.chirpSad
-      waitcnt(clkfreq*100000 + cnt)
+      delay_ms(20000)
       reboot
 
   ' Print out the MAC address on the TV
@@ -122,18 +122,20 @@ PUB init | i, tv_mode
     subsys.StatusFatalError
     subsys.chirpSad
     outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
-    ' Reboot after 20 seconds.
-    waitcnt(clkfreq*20000 + cnt)
+    ' Reboot after 20 seconds, unless the
+    ' user presses the button causing a
+    ' stage 2 boot.
+    repeat 200
+      buttonCheck
+      delay_ms(100)
     reboot
-
-  ' Make a happy noise, we are moving along!
-  subsys.chirpHappy
 
   ' Wait for the IP address if we don't already have one.
   if NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
     term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
-      delay_ms(500)
+      buttonCheck
+      delay_ms(100)
     term.out($0A)
     term.out($00)  
 
@@ -146,19 +148,22 @@ PUB init | i, tv_mode
   term.out(13)  
 
   ' If we have a DNS address, print that out too.
-  if settings.getData(settings#NET_IPv4_DNS,@stack,4)
-    term.str(string("DNS ADDR: "))
-    repeat i from 0 to 3
-      if i
-        term.out(".")
-      term.dec(byte[@stack][i])
-    term.out(13)  
+  'if settings.getData(settings#NET_IPv4_DNS,@stack,4)
+  '  term.str(string("DNS ADDR: "))
+  '  repeat i from 0 to 3
+  '    if i
+  '      term.out(".")
+  '    term.dec(byte[@stack][i])
+  '  term.out(13)  
 
   if stage_two
     subsys.FadeToColor(255,255,255,200)
     term.str(string("BOOTLOADER UPGRADE",13,"STAGE TWO",13))
   else
     subsys.StatusIdle
+
+  ' Make a happy noise, we are moving along!
+  subsys.chirpHappy
 
   ' Infinite loop
   repeat

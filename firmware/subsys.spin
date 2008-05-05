@@ -27,9 +27,18 @@ CON
   LED_GPin = 10
   LED_BPin = 11
   LED_Brightness = 8 ' 0 = least bright, 8 = most bright
+  IRPin = 15
   BTTNPin = 16
   SPKRPin = 8
   RTCADDR = $7A00
+
+
+  ' Error codes
+
+  ERR_RUNTIME      = 1
+  ERR_NO_CONNECT   = 2
+  ERR_DISCONNECTED = 3
+  
 DAT
 TMP     long 0
 TMP2    long 0
@@ -38,6 +47,7 @@ LED_G   byte 0
 LED_B   byte 0
 modecog byte 0
 subsyscog byte 0
+lasterror byte 0
 OBJ
   settings      : "settings"
 VAR
@@ -74,6 +84,7 @@ PUB Stop
     cogstop(modecog~ - 1)
     modecog:=0
 PUB StatusOff
+  lasterror:=0
   if modecog
     cogstop(modecog~ - 1)
     modecog:=0
@@ -86,11 +97,11 @@ PRI irTestCycle
   LED_G:=0
   LED_B:=255
   repeat
-    waitpeq(FALSE,1<<15,0)
+    waitpeq(FALSE,1<<IRPin,0)
     LED_R:=255
     LED_G:=255
     LED_B:=0
-    waitpne(FALSE,1<<15,0)
+    waitpne(FALSE,1<<IRPin,0)
     LED_R:=0
     LED_G:=0
     LED_B:=255
@@ -104,10 +115,13 @@ PUB StatusLoading
 
 PUB StatusFatalError
   StatusOff
-  modecog := cognew(FatalErrorCycle, @stack) + 1 
-PUB StatusError
+  modecog := cognew(ErrorCycle, @stack) + 1 
+PUB StatusErrorCode(i)
+  if lasterror == i
+    return
   StatusOff
-  modecog := cognew(FatalErrorCycle, @stack) + 1
+  lasterror := i
+  modecog := cognew(ErrorCodeCycle(i), @stack) + 1
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
@@ -144,29 +158,44 @@ pub ChirpSad | i
 
 pub Click | i
   outa[SPKRPin]:=1  
-  delay_ms(1)
+  delay_ms(10)
   outa[SPKRPin]:=0
 
 PUB StatusSolid(r,g,b)
   StatusOff
+  SetColor(r,g,b)
+
+PRI SetColor(r,g,b)
   LED_R:=r
   LED_G:=g
   LED_B:=b
-PUB FatalErrorCycle
+PRI ErrorCodeCycle(i)
+  repeat
+    repeat i-1
+      SetColor(255,0,0)
+      delay_ms(250)
+      SetColor(0,0,0)
+      delay_ms(300)
+    SetColor(255,0,0)
+    FadeToColorBlocking(0,0,0,1000)
+    delay_ms(500)
+PRI ErrorCycle
   repeat
     FadeToColorBlocking(255,0,0,100)
     FadeToColorBlocking(0,0,0,100)
   
-PUB LoadingCycle
+PRI LoadingCycle
   repeat
-    FadeToColorBlocking(0,0,255,500)
+    FadeToColorBlocking(0,127,255,500)
     FadeToColorBlocking(0,0,0,500)
 
-PUB ColorCycle
+PRI ColorCycle
+  ' Quicly fade to green
+  FadeToColorBlocking(0,255,0,500)
   repeat
-    FadeToColorBlocking(0,255,0,2000)
-    FadeToColorBlocking(255,0,0,2000)
-    FadeToColorBlocking(0,0,255,2000)
+    FadeToColorBlocking(255,0,0,3000)   ' red
+    FadeToColorBlocking(0,0,255,3000)   ' blue
+    FadeToColorBlocking(0,255,0,3000)   ' green
 
 PUB RTC
   return long[RTCADDR]

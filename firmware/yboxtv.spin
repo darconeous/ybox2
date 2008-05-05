@@ -95,8 +95,6 @@ PUB init | i
     waitcnt(clkfreq*10000 + cnt)
     reboot
 
-  HappyChirp
-
   if settings.getData(settings#NET_MAC_ADDR,@weatherstack,6)
     term.str(string("MAC: "))
     repeat i from 0 to 5
@@ -108,6 +106,8 @@ PUB init | i
   if NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
     term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@weatherstack,4)
+      if ina[subsys#BTTNPin]
+        reboot
       delay_ms(500)
   term.out($0A)
   term.out($00)  
@@ -146,6 +146,8 @@ PUB init | i
     term.str(@weatherstack)
     term.str(string("'",13))
    
+  HappyChirp
+
   main
 PRI initial_configuration
   
@@ -285,7 +287,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
             subsys.StatusLoading
             quit
           if cnt-timeout>10*clkfreq ' 10 second timeout      
-            subsys.StatusFatalError
+            subsys.StatusErrorCode(subsys#ERR_DISCONNECTED)
             stat_errors++
             showMessage(string("Error: Connection Lost!"))    
             tel.close
@@ -295,7 +297,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
             delay_ms(retrydelay)             ' failed to connect     
             quit
     else
-      subsys.StatusFatalError
+      subsys.StatusErrorCode(subsys#ERR_NO_CONNECT)
       stat_errors++
       showMessage(string("Error: Failed to Connect!"))    
       tel.close
