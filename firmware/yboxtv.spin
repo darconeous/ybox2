@@ -17,12 +17,12 @@ OBJ
 
   tel           : "api_telnet_serial"
   term          : "TV_Text"
-  ir            : "ir_reader_sony"
+'  ir            : "ir_reader_sony"
   subsys        : "subsys"
   settings      : "settings"
                                      
 VAR
-  long weatherstack[80] 
+  long weatherstack[150] 
   byte path_holder[128]
   byte tv_mode
 
@@ -72,7 +72,7 @@ PUB init | i
   if settings.findKey(settings#MISC_STAGE_TWO)
     settings.removeKey(settings#MISC_STAGE_TWO)
 
-  ir.init(15, 0, 300, 1)
+  'ir.init(15, 0, 300, 1)
          
   if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
     dira[subsys#SPKRPin]:=1
@@ -168,7 +168,7 @@ PUB main | ircode
     subsys.StatusFatalError
     SadChirp
     
-
+{{
   return
   
   repeat while true
@@ -220,7 +220,7 @@ PUB main | ircode
       subsys.StatusIdle
     if ircode == $02
       subsys.StatusFatalError
-    
+}}    
 
 pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
   port := 20000

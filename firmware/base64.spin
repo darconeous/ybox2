@@ -1,6 +1,7 @@
 {{
-** Base64 decoding/encoding functions
+** Base64 decoding/encoding functions v0.1
 ** by Robert Quattlebaum <darco@deepdarc.com>
+** PUBLIC DOMAIN
 ** 2008-04-18
 **
 ** TODO: Implement this in ASM!
@@ -54,4 +55,3 @@ PRI base64_decode_4(inptr,outptr) | retVal,i,out
     repeat i from 0 to retVal-1
       BYTE[outptr][i]:=BYTE[@out][2-i]
   return retVal
-
