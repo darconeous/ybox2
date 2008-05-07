@@ -119,7 +119,7 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
   pkt := nic.get_packetpointer
 
     
-  i := 0
+  i~
   linkstat:=nic.isLinkUp
 
   if linkstat  
@@ -141,7 +141,7 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
     if has_valid_ip_addr AND i > 2
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
       \tick_tcpsend
-      i := 0
+      i~
 
 PRI service_packet
   ' lets process this frame
@@ -468,10 +468,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     LONG[handle_addr + sAge] := long[RTCADDR]
     'resetBuffers(handle)
 
-PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
+PRI reject_tcp | dstport,srcport,seq,ack,chksum
   bounce_unreachable(3)
 
-  'srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -769,7 +768,7 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will not block (returns -1 if no byte avail)
 
-  rxbyte := -1
+  rxbyte~~
   if WORD[@rx_tail][handle] <> WORD[@rx_head][handle]
     ptr := @rx_buffer + (handle * buffer_length)
     rxbyte := byte[ptr][WORD[@rx_tail][handle]]
@@ -1036,7 +1035,7 @@ pub dhcp_rebind
   if ip_dhcp_state<>DHCP_STATE_DISABLED
     ip_dhcp_state:=DHCP_STATE_UNBOUND
     ip_dhcp_delay:=2       
-    ip_dhcp_next:=0
+    ip_dhcp_next~
 PRI dhcp_process
 '' Called by the main network loop periodicly
   if ip_dhcp_state<>DHCP_STATE_DISABLED AND LONG[RTCADDR] => ip_dhcp_next
@@ -1208,7 +1207,7 @@ PRI dhcp_offer_response | i, ptr
 
   return nic.send_frame
 
-PRI handle_dhcp | i, ptr, handle, handle_addr, xid, dstport, srcport, datain_len
+PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
 
   srcport := BYTE[pkt][UDP_srcport] << 8 + BYTE[pkt][constant(UDP_srcport + 1)]
 

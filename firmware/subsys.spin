@@ -93,18 +93,12 @@ PUB irTest
   modecog := cognew(irTestCycle, @stack) + 1 
 
 PRI irTestCycle
-  LED_R:=0
-  LED_G:=0
-  LED_B:=255
+  SetColor(0,0,255)
   repeat
     waitpeq(FALSE,1<<IRPin,0)
-    LED_R:=255
-    LED_G:=255
-    LED_B:=0
+    SetColor(255,255,0)
     waitpne(FALSE,1<<IRPin,0)
-    LED_R:=0
-    LED_G:=0
-    LED_B:=255
+    SetColor(0,0,255)
 
 PUB StatusIdle
   StatusOff
@@ -136,12 +130,8 @@ PUB FadeToColorBlocking(rB,gB,bB,dur)|i,rA,gA,bA
   ifnot dur
     dur:=1
   repeat i from 0 to (1<<15) step dur
-    LED_R:=(((rB-rA)*i)>>15)+rA        
-    LED_G:=(((gB-gA)*i)>>15)+gA        
-    LED_B:=(((bB-bA)*i)>>15)+bA        
-  LED_R:=rB
-  LED_G:=gB
-  LED_B:=bB
+    SetColor((((rB-rA)*i)>>15)+rA,(((gB-gA)*i)>>15)+gA,(((bB-bA)*i)>>15)+bA)
+  SetColor(rB,gB,bB)
    
 pub ChirpHappy | i, j
   repeat j from 0 to 2

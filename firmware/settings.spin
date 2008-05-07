@@ -1,18 +1,27 @@
 {{
-        ybox2 - settings object
-        http://www.deepdarc.com/ybox2
-
+        Settings Object v1.0
+        Robert Quattlebaum <darco@deepdarc.com>
+        PUBLIC DOMAIN
+        
         This object handles the storage and retreval of variables
         and data which need to persist across power cycles.
 
-        Also allows for some rudamentry cross-object communication.
-        It's not terribly fast though, so it should be read-from
+        By default requires a 64KB EEPROM to save things persistantly.
+        You can make it work with a 32KB EEPROM by changing the
+        EEPROMOffset constant to zero.
+
+        Also, since it is effectively a "singleton" type of object,
+        it allows for some rudamentry cross-object communication.
+        It is not terribly fast though, so it should be read-from
         and written-to sparingly.
 
-        Format is as follows
+        The data is stored at the end of hub ram, starting at $8000
+        and expanding downward.
 
-        2 Bytes                 Key Value
-        1 Byte                  Key Length
+        The format is as follows (in reverse!):
+
+        1 Word                  Key Value
+        1 Byte                  Data Length
         1 Byte                  Check Byte (Ones complement of key length)
         x Bytes                 Data
         1 Byte (Optional)       Padding, if size is odd
@@ -27,56 +36,68 @@
         the actual data contained in a variable isn't stored
         backward. Doing so would have made things more complicated
         without any obvious benefit.
-
-        Currently requires a 64KB EEPROM to save things persistantly.
 }} 
-CON
-  EEPROMPageSize = 128
-
+CON { Tweakable parameters }
   SettingsSize = $400
+  EEPROMOffset = $8000 ' Change to zero if you want to use with a 32KB EEPROM
+
+CON { Non-tweakable constants}
+  EEPROMPageSize = 128
   SettingsTop = $8000 - 1
   SettingsBottom = SettingsTop - (SettingsSize-1)
 
-  MISC_UUID          = ("I"<<8) + "D"
-  MISC_PASSWORD      = ("P"<<8) + "W"
-  MISC_AUTOBOOT      = ("A"<<8) + "B"
-  MISC_SOUND_DISABLE = ("s"<<8) + "-"
-  MISC_LED_CONF      = ("L"<<8) + "C" ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
-  MISC_TV_MODE       = ("t"<<8) + "v" ' 1 byte, 0=NTSC, 1=PAL
+CON { Keys for various stuff }
+  MISC_UUID          = "i"+("d"<<8)
+  MISC_PASSWORD      = "p"+("w"<<8)
+  MISC_AUTOBOOT      = "a"+("b"<<8)
+  MISC_SOUND_DISABLE = "s"+("-"<<8)
+  MISC_LED_CONF      = "l"+("c"<<8) ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
+  MISC_TV_MODE       = "t"+("v"<<8) ' 1 byte, 0=NTSC, 1=PAL
 
-  MISC_STAGE_TWO     = ("S"<<8) + "2"
+  MISC_STAGE_TWO     = "2"+("2"<<8)
 
-  NET_MAC_ADDR       = ("E"<<8) + "A"
-  NET_IPv4_ADDR      = ("4"<<8) + "A"
-  NET_IPv4_MASK      = ("4"<<8) + "M"
-  NET_IPv4_GATE      = ("4"<<8) + "G"
-  NET_IPv4_DNS       = ("4"<<8) + "D"
-  NET_DHCPv4_DISABLE = ("4"<<8) + "d"
+  NET_MAC_ADDR       = "E"+("A"<<8)
+  NET_IPv4_ADDR      = "4"+("A"<<8)
+  NET_IPv4_MASK      = "4"+("M"<<8)
+  NET_IPv4_GATE      = "4"+("G"<<8)
+  NET_IPv4_DNS       = "4"+("D"<<8)
+  NET_DHCPv4_DISABLE = "4"+("d"<<8)
   
-  SERVER_IPv4_ADDR   = ("S"<<8) + "A" 
-  SERVER_IPv4_PORT   = ("S"<<8) + "P" 
-  SERVER_PATH        = ("S"<<8) + "T" 
-  SERVER_HOST        = ("S"<<8) + "H"
+  SERVER_IPv4_ADDR   = "S"+("A"<<8) 
+  SERVER_IPv4_PORT   = "S"+("P"<<8) 
+  SERVER_PATH        = "S"+("T"<<8) 
+  SERVER_HOST        = "S"+("H"<<8)
 
   
 DAT
 SettingsLock  byte      -1
 OBJ
   eeprom : "Basic_I2C_Driver"
-PUB start | i,addr
+PUB start
+{{ Initializes the object. Call only once. }}
   if(SettingsLock := locknew) == -1
     abort FALSE
 
+  eeprom.Initialize(eeprom#BootPin)
+
+  ' If we don't have any environment variables, try to load the defaults from EEPROM
   if not size
-    ' If we don't have any environment variables, try to load the defaults from EEPROM
-    addr := SettingsBottom & %11111111_10000000
-    eeprom.Initialize(eeprom#BootPin)
-    repeat i from 0 to SettingsSize/EEPROMPageSize-1
-      eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, SettingsSize)
-      addr+=EEPROMPageSize
+    revert
+
   return TRUE
+PUB revert | i, addr
+{{ Retrieves the settings from EEPROM, overwriting any changes that were made. }}  
+  lock
+  addr := SettingsBottom & %11111111_10000000
+  repeat i from 0 to SettingsSize/EEPROMPageSize-1
+    eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset, addr, SettingsSize)
+    addr+=EEPROMPageSize
+  unlock
 PUB purge
+{{ Removes all settings. }}
+  lock
   bytefill(SettingsBottom,$FF,SettingsSize) 
+  unlock
 PUB stop
   lockret(SettingsLock)
   SettingsLock := -1
@@ -85,14 +106,15 @@ PRI lock
 PRI unlock
   lockclr(SettingsLock)
 PUB commit | addr, i
+{{ Commits current settings to EEPROM }}
   lock
   addr := SettingsBottom & %11111111_10000000
   eeprom.Initialize(eeprom#BootPin)
   repeat i from 0 to SettingsSize/EEPROMPageSize-1
-    if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+$8000, addr, EEPROMPageSize)
+    if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset, addr, EEPROMPageSize)
       unlock
       abort FALSE
-    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+$8000)
+    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset)
     addr+=EEPROMPageSize
   unlock
 
@@ -102,9 +124,10 @@ pri nextEntry(iter)
   return iter-(4+((byte[iter-2]+1) & !1))
 
 PUB size | iter
+{{ Returns the current size of all settings }}
   iter := SettingsTop
   repeat while isValidEntry(iter)
-    iter:=nextEntry(iter)
+    iter := nextEntry(iter)
   return SettingsTop-iter
 
 PRI findKey_(key) | iter
@@ -114,23 +137,25 @@ PRI findKey_(key) | iter
       return iter
     iter:=nextEntry(iter)
   return 0
-PUB findKey(key) | retVal
+PUB findKey(key):retVal
+{{ Returns non-zero if the given key exists in the store }}
   lock
   retVal:=findKey_(key)
   unlock
-  return retVal
 PUB firstKey
+{{ Returns the key of the first setting }}
   if isValidEntry(SettingsTop)
     return word[SettingsTop]
   return 0
 
 PUB nextKey(key) | iter
+{{ Finds and returns the key of the setting after the given key }}
   lock
   iter:=nextEntry(findKey_(key))
   if isValidEntry(iter)
     key:=word[iter]
   else
-    key:=0
+    key~
   unlock
   return key
 PUB getData(key,ptr,size_) | iter
@@ -142,66 +167,79 @@ PUB getData(key,ptr,size_) | iter
     
     bytemove(ptr, iter-3-byte[iter-2], size_)
   else
-    size_:=0
+    size_~
   unlock
   return size_
-PUB removeKey(key) | iter, nxtKey
+PUB removeKey(key): iter
   lock
   iter := findKey_(key)
   if iter
-    nxtKey := nextEntry(iter)
-    bytemove(SettingsBottom+iter-nxtKey,SettingsBottom, nxtKey-SettingsBottom+1)
+    key := nextEntry(iter)
+    bytemove(SettingsBottom+iter-key,SettingsBottom, key-SettingsBottom+1)
   unlock
-  return iter
-PUB setData(key,ptr,size_) | iter
+PUB setData(key,ptr,size_): iter
+
+  ' We set a value by first removing
+  ' the previous value and then
+  ' appending the value at the end.
+  
   removeKey(key)
+
   lock
   iter := SettingsTop
+
+  ' Runtime sanity check.
   if size_>255
     abort FALSE
+
+  ' Traverse to the end of the last setting
   repeat while isValidEntry(iter)
     iter:=nextEntry(iter)
+
+  ' Make sure there is enough space left
   if iter-3-size_<SettingsBottom
     unlock
     abort FALSE
+
+  ' Append the new setting  
   word[iter]:=key
   byte[iter-2]:=size_
   byte[iter-3]:=!size_
   bytemove(iter-3-size_,ptr,size_)
-  unlock
-  return iter
 
-PUB getString(key,ptr,size_) | strlen
-  ' Strings must be zero terminated.
+  ' Make sure that this is the last entry.
+  iter:=nextEntry(iter)
+  if isValidEntry(iter)
+    word[iter]~~
+    word[iter-1]~~
+      
+  unlock
+
+PUB getString(key,ptr,size_): strlen
   strlen:=getData(key,ptr,size_-1)
+  ' Strings must be zero terminated.
   byte[ptr][strlen]:=0  
-  return strlen
   
 PUB setString(key,ptr)
   return setData(key,ptr,strsize(ptr))  
   
-PUB getLong(key) | retVal
-  if getData(key,@retVal,4)
-    return retVal
-  return -1
+PUB getLong(key): retVal
+  retVal~
+  getData(key,@retVal,4)
   
 PUB setLong(key,value)
-  setData(key,@value,4)
+  return setData(key,@value,4)
 
-PUB getWord(key) | retVal
-  retVal := 0
-  if getData(key,@retVal,2)
-    return retVal
-  return -1
+PUB getWord(key): retVal
+  retVal~
+  getData(key,@retVal,2)
   
 PUB setWord(key,value)
-  setData(key,@value,2)
+  return setData(key,@value,2)
 
-PUB getByte(key) | retVal
-  retVal:=0
-  if getData(key,@retVal,1)
-    return retVal
-  return -1
+PUB getByte(key): retVal
+  retVal~
+  getData(key,@retVal,1)
   
 PUB setByte(key,value)
-  setData(key,@value,1)
+  return setData(key,@value,1)

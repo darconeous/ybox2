@@ -157,6 +157,7 @@ PUB ReadPage(SCL, devSel, addrReg, dataPtr, count) : ackbit
    Stop(SCL)
    return ackbit
 
+{
 PUB ReadByte(SCL, devSel, addrReg) : data
 '' Read in a single byte of i2c data.  Device select code is devSel.  Device
 '' starting address is addrReg.  The device select code is modified using the
@@ -178,7 +179,7 @@ PUB ReadLong(SCL, devSel, addrReg) : data
 '' Note that you can't distinguish between a return value of -1 and true error.
    if ReadPage(SCL, devSel, addrReg, @data, 4)
       return -1
-
+}
 PUB WritePage(SCL, devSel, addrReg, dataPtr, count) : ackbit
 '' Write out a block of i2c data.  Device select code is devSel.  Device starting
 '' address is addrReg.  Data address is at dataPtr.  Number of bytes is count.
@@ -198,6 +199,7 @@ PUB WritePage(SCL, devSel, addrReg, dataPtr, count) : ackbit
    Stop(SCL)
    return ackbit
 
+{
 PUB WriteByte(SCL, devSel, addrReg, data)
 '' Write out a single byte of i2c data.  Device select code is devSel.  Device
 '' starting address is addrReg.  The device select code is modified using the
@@ -223,7 +225,7 @@ PUB WriteLong(SCL, devSel, addrReg, data)
    if WritePage(SCL, devSel, addrReg, @data, 4)
       return true
    return false
-
+}
 PUB WriteWait(SCL, devSel, addrReg) : ackbit
 '' Wait for a previous write to complete.  Device select code is devSel.  Device
 '' starting address is addrReg.  The device will not respond if it is busy.

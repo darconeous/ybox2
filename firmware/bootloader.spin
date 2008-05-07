@@ -33,8 +33,8 @@ productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
 PUB init | i, tv_mode
-  dira[0]:=1 ' Set direction on reset pin
-  outa[0]:=0 ' Set state on reset pin to LOW
+  dira[0]~~ ' Set direction on reset pin
+  outa[0]~ ' Set state on reset pin to LOW
 
   ' Default to NTSC
   tv_mode:=term#MODE_NTSC
@@ -116,12 +116,12 @@ PUB init | i, tv_mode
       subsys.chirpHappy
       reboot
 
-  outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
+  outa[0]~~ ' Pull ethernet reset pin high, ending the reset condition.
   if not \websocket.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     subsys.chirpSad
-    outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+    outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
     ' Reboot after 20 seconds, unless the
     ' user presses the button causing a
     ' stage 2 boot.
@@ -182,6 +182,9 @@ PRI resetSettings | key, nextKey, ledconf
       settings#NET_MAC_ADDR:   ' Preserve MAC Address
       settings#MISC_UUID:      ' Preserve UUID
       settings#MISC_LED_CONF:  ' Preserve LED Configuration ONLY if it is sane
+        ' We need to do this check because it is possible
+        ' for a misconfigured LED configuration to interfere
+        ' with the ethernet controller.
         if settings.getData(key,@ledconf,4) < 4
           ' If we are less than the expected size, kill it
           settings.removeKey(key)
@@ -196,8 +199,12 @@ PRI resetSettings | key, nextKey, ledconf
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE_TWO,TRUE)
  
-  outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+  outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
 
+  if stage_two
+    ' If we are already in stage 2, forget it... just reboot.
+    reboot
+    
   ' Very aggressively shut down everything except our own cog
   repeat i from 0 to 7
     if cogid<>i
@@ -238,8 +245,8 @@ PRI initial_configuration | i
   settings.commit
   return TRUE
 
-PUB atoi(inptr) | i,char, retVal
-  retVal:=0
+PUB atoi(inptr):retVal | i,char
+  retVal~
   
   ' Skip leading whitespace
   repeat while BYTE[inptr] AND BYTE[inptr]==" "
@@ -250,8 +257,7 @@ PUB atoi(inptr) | i,char, retVal
       "0".."9":
         retVal:=retVal*10+char-"0"
       OTHER:
-        return retVal
-  return retVal 
+        quit
 pri printBanner
   term.str(string($0C,7))
   term.str(@productName)
@@ -327,9 +333,13 @@ HTTP_HEADER_CONTENT_TYPE BYTE "Content-Type",0
 HTTP_HEADER_LOCATION     BYTE "Location",0
 HTTP_HEADER_CONTENT_DISPOS     BYTE "Content-disposition",0
 HTTP_HEADER_CONTENT_LENGTH     BYTE "Content-Length",0
+HTTP_HEADER_REFRESH BYTE "Refresh",0
 
 HTTP_CONTENT_TYPE_HTML  BYTE "text/html; charset=utf-8",0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
+
+OK         BYTE "OK",13,10,0
+
 
 RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
 STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
@@ -427,18 +437,18 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           char:=websocket.rxtime(1000)
           buffer[i++]:=char
           contentLength--
-        buffer[i]:=0
-        buffer2[0]:=0
+        buffer[i]~
+        buffer2[0]~
         i:=http.getFieldFromQuery(@buffer,string("username"),@buffer2,127)
         if i
           buffer2[i++]:=":"
           j:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2+i,63)
           ifnot j
-             i:=0
+             i~
           else
             j:=http.getFieldFromQuery(@buffer,string("pwd2"),@httpQuery,63)
           if j==0 OR NOT strcomp(@httpQuery,@buffer2+i)
-            i:=0
+            i~
          
         ifnot i
           websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
@@ -454,27 +464,27 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
           websocket.str(@HTTP_CONNECTION_CLOSE)
           websocket.str(@CR_LF)
-          websocket.str(string("OK",13,10))
+          websocket.str(@OK)
       elseif strcomp(@httpPath,string("/reboot"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
+        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("REBOOTING",13,10))
         websocket.close
-        outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+        outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
         reboot
       elseif strcomp(@httpPath,string("/irtest"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
+        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("5;url=/"))        
         websocket.str(@CR_LF)
         subsys.irTest
         websocket.str(string("Status LED should now blink on IR activity.",13,10))
       elseif strcomp(@httpPath,string("/stage2"))
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
+        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("BOOTING STAGE 2",13,10))
         websocket.close
@@ -488,7 +498,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
-        websocket.str(string("OK",13,10))
+        websocket.str(@OK)
       elseif strcomp(@httpPath,string("/ledconfig"))
         ifnot authorized
           httpUnauthorized
@@ -526,7 +536,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           websocket.str(string("DISABLED",13,10))
-      elseif strcomp(@httpPath,RAMIMAGE_EEPROM_FILE)
+      elseif strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
           websocket.close
@@ -539,7 +549,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@CR_LF)
         repeat i from 0 to $7FFF
           websocket.tx(BYTE[i])
-      elseif strcomp(@httpPath,STAGE2_EEPROM_FILE)
+      elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
           websocket.close
@@ -548,9 +558,12 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
+        websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
+        websocket.str(string(": "))
+        websocket.dec(constant($8000-settings#SettingsSize))
+        websocket.str(@CR_LF)        
         websocket.str(@CR_LF)
-        repeat i from 0 to $7FFF step 128
+        repeat i from 0 to $7FFF-settings#SettingsSize step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
             quit
           repeat j from 0 to 127
@@ -581,7 +594,6 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
           next
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        'websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("text/x-plist"))        
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.plist"))        
         websocket.str(@CR_LF)
         configPList
@@ -604,8 +616,8 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@HTTP_403)
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         if (i:=\downloadFirmwareHTTP(contentLength))
-          subsys.chirpSad
           subsys.StatusFatalError
+          subsys.chirpSad
           websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
           websocket.str(@HTTP_CONNECTION_CLOSE)
           websocket.str(@CR_LF)
@@ -615,16 +627,16 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         else
           if strcomp(@httpQuery,string("boot")) OR stage_two
             websocket.str(@HTTP_200)
-            websocket.txmimeheader(string("Refresh"),string("12;url=/"))        
+            websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
             websocket.str(@CR_LF)
             if stage_two
-              websocket.str(string("OK - Rebooting",13,10))
+              websocket.str(@OK)
               websocket.close
-              outa[0]:=0 ' Pull ethernet reset pin low, starting a reset condition.
+              outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
               reboot
             else
-              websocket.str(string("OK - Booting stage 2",13,10))
+              websocket.str(@OK)
               websocket.close
               boot_stage2
           else
@@ -632,7 +644,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
             websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
             websocket.str(@CR_LF)
-            websocket.str(string("OK",13,10))
+            websocket.str(@OK)
       else
         httpNotFound
     else
@@ -648,9 +660,9 @@ pub infoPage | i
     websocket.str(string("ybox.macaddr = '"))
     repeat i from 0 to 5
       if i
-        websocket.tx("-")
+        websocket.tx(":")
       websocket.hex(byte[@httpMethod][i],2)
-    websocket.str(string("'",10))
+    websocket.str(string("';",10))
 
   if settings.getData(settings#MISC_UUID,@httpQuery,16)
     websocket.str(string("ybox.uuid = '"))
@@ -668,14 +680,15 @@ pub infoPage | i
     websocket.tx("-")
     repeat i from 10 to 15
       websocket.hex(byte[@httpQuery][i],2)
-    websocket.str(string("'",10))
+    websocket.str(string("';",10))
     
   websocket.str(string("ybox.uptime = "))
   websocket.dec(subsys.RTC)
-  websocket.tx(10)
+  websocket.str(string("';",10))
   websocket.str(string("ybox.ina = "))
   websocket.dec(ina)
-  websocket.tx(10)
+  websocket.str(string("';",10))
+
 PRI configPList | key,ptr,printable
 '' Outputs all of the current settings as a property list
   key:=settings.firstKey
@@ -841,12 +854,12 @@ pub indexPage(authorized) | i
 pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j, isFading
   eeprom.Initialize(eeprom#BootPin)
 
-  i:=0
-  total:=0
-  isFading:=0
+  i~
+  total~
+  isFading~
   
   if stage_two
-    addr:=$0000 ' Stage two writes to the lower 32KB
+    addr~ ' Stage two writes to the lower 32KB
   else
     addr:=$8000 ' Stage one writes to the upper 32KB
 
@@ -855,7 +868,7 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
    
   repeat
     if (in := websocket.rxcheck) => 0
-      isFading:=0
+      isFading~
       subsys.StatusSolid(0,255,0)
       buffer[i++] := in
       if i == 128
@@ -874,7 +887,7 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
             abort -3
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
-        i:=0
+        i~
         bytefill(@buffer,0,128)
         
         term.out(".")
@@ -883,7 +896,7 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
     else
       ifnot isFading
         subsys.FadeToColor(255,0,0,500)
-        isFading:=1
+        isFading~~
       if websocket.isEOF OR (total+i) => contentLength
         if stage_two
           ' Do we have the correct number of bytes?
@@ -1144,17 +1157,11 @@ delay5_ret              ret                             '1
 '
 ' Constants
 '
-'mask_rx                 long    $80000000
-'mask_tx                 long    $40000000
 mask_sda                long    $20000000
 mask_scl                long    $10000000
-'time                    long    150 * 20000 / 4 / 2     '150ms (@20MHz, 2 inst/loop)
-'time_load               long    100 * 20000 / 4 / 2     '100ms (@20MHz, 2 inst/loop)
 time_xtal               long    20 * 20000 / 4 / 1      '20ms (@20MHz, 1 inst/loop)
-'lfsr                    long    "P"
 zero                    long    0
 smode                   long    0
-'hFFF9FFFF               long    $FFF9FFFF
 h8000                   long    $8000
 programsize             long    $8000-settings#SettingsSize
 interpreter             long    $0001 << 18 + $3C01 << 4 + %0000
@@ -1168,6 +1175,4 @@ raddress                res     1
 count                   res     1
 bits                    res     1
 eedata                  res     1
-'rxdata                  res     1
-'delta                   res     1
-'threshold               res     1
+
