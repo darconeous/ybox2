@@ -4,7 +4,7 @@ CON
   _xinfreq = 5_000_000
 OBJ
   term          : "TV_Text"
-  q             : "q"
+  q             : "qring"
 VAR
   long stack[100]
   byte qhc
@@ -25,9 +25,9 @@ PUB init | qh, err
       term.dec(err)
       term.str(string(13))
 
-      term.str(string("Pages in use: "))
-      term.dec(q.pagesUsed)
-      term.str(string(13))
+      'term.str(string("Pages in use: "))
+      'term.dec(q.pagesUsed)
+      'term.str(string(13))
       dira[9]:=1
       outa[9]:=1
       quit
