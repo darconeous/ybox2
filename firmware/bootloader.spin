@@ -378,7 +378,6 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
       delay_ms(1000)
       websocket.closeall
       next
-    websocket.resetBuffers
     contentLength:=0
 
     repeat while NOT websocket.waitConnectTimeout(100)
@@ -633,11 +632,13 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
             if stage_two
               websocket.str(@OK)
               websocket.close
+              delay_ms(100)
               outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
               reboot
             else
               websocket.str(@OK)
               websocket.close
+              delay_ms(100)
               boot_stage2
           else
             websocket.str(@HTTP_303)

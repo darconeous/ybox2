@@ -38,11 +38,6 @@ PUB isEOF
 
   return tcp.isEOF(_handle)
 
-PUB resetBuffers
-
-  if handle=>0
-    tcp.resetBuffers(_handle)
-
 PUB waitConnectTimeout(ms) | t
 
   t := cnt

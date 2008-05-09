@@ -3,7 +3,7 @@
 }}
 CON
   Q_MAX = 4
-  Q_SIZE = 1024
+  Q_SIZE = 512
   buffer_mask   = Q_SIZE - 1
 CON
   ERR_Q_EMPTY       = -5

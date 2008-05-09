@@ -175,7 +175,6 @@ pub httpServer | char, i, lineLength,contentLength,authorized
       socket.closeall
       next
     'term.str(string("Waiting",13))
-    socket.resetBuffers
     repeat while NOT socket.isConnected
       socket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
