@@ -745,9 +745,10 @@ PUB isValidHandle(handle) | handle_addr
   
 PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
-'' Will not block (returns -1 if no byte avail)
+'' Will not block (returns q#ERR_Q_EMPTY if no byte avail)
 
-  return \q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])
+  if (rxbyte:=\q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])) < 0 AND rxbyte<>q#ERR_Q_EMPTY
+    abort rxbyte  
     
 PUB readByteTimeout(handle,ms) : rxbyte | ptr,t
 '' Read a byte from the specified socket
@@ -757,23 +758,24 @@ PUB readByteTimeout(handle,ms) : rxbyte | ptr,t
   t := cnt
   repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
     if (cnt - t) / (clkfreq / 1000) > ms
-      abort -1
+      abort q#ERR_Q_EMPTY
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will block until a byte is received
   repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
 
-PUB writeByteNonBlocking(handle, txbyte) | ptr
+PUB writeByteNonBlocking(handle, txbyte):retVal | ptr
 '' Writes a byte to the specified socket
-'' Will not block (returns -1 if no buffer space available)
+'' Will not block (returns q#ERR_Q_FULL if no buffer space available)
 
-  return \q.push(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],txbyte)
+  if (retVal:=\q.push(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],txbyte)) < 0 AND retVal<>q#ERR_Q_FULL
+    abort retVal  
 
-PUB writeByte(handle, txbyte)
+PUB writeByte(handle, txbyte):retVal
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
 
-  repeat while writeByteNonBlocking(handle, txbyte) == q#ERR_Q_FULL
+  repeat while (retVal:=writeByteNonBlocking(handle, txbyte)) == q#ERR_Q_FULL
     ifnot isValidHandle(handle)
       abort -1
 
