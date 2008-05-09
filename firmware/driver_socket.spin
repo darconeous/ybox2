@@ -234,10 +234,10 @@ PRI handle_arp | i
 PRI handle_arpreply | handle, handle_addr, ip, found
   ' Gets arp reply if it is a response to an ip we have
 
-  ip := (BYTE[pkt][arp_sipaddr] << 24) + (BYTE[pkt][constant(arp_sipaddr + 1)] << 16) + (BYTE[pkt][constant(arp_sipaddr + 2)] << 8) + (BYTE[pkt][constant(arp_sipaddr + 3)])
-  
+  bytemove(@ip, pkt + arp_sipaddr, 4)
+
   found := false
-  if ip == conv_endianlong(LONG[@ip_gateway])
+  if ip == LONG[@ip_gateway]
     ' find a handle that wants gateway mac
     repeat handle from 0 to constant(sNumSockets - 1)
       handle_addr := @sSockets + (sSocketBytes * handle)
@@ -249,7 +249,7 @@ PRI handle_arpreply | handle, handle_addr, ip, found
     repeat handle from 0 to constant(sNumSockets - 1)
       handle_addr := @sSockets + (sSocketBytes * handle)
       if BYTE[handle_addr + sConState] == SCONNECTINGARP2
-        if LONG[handle_addr + sSrcIp] == conv_endianlong(ip)
+        if LONG[handle_addr + sSrcIp] == ip
           found := true
           quit
           
@@ -324,14 +324,14 @@ PRI handle_udp | dstport
     DHCP_PORT_CLIENT: handle_dhcp
     other: bounce_unreachable(3)
         
-PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , head_work
+PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, datain_len  , seq
   ' Handles incoming TCP packets
 
   ifnot compare_ipaddr(pkt+ip_destaddr,@ip_addr)
     ' Only let TCP work if the destination matches our address.
     abort
 
-  srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
+  bytemove(@srcip, pkt + ip_srcaddr, 4)
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -343,6 +343,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   ' at this point we assume we have an active socket, or a socket available to be used
   datain_len := ((BYTE[pkt][ip_pktlen] << 8) + BYTE[pkt][constant(ip_pktlen + 1)]) - ((BYTE[pkt][ip_vers_len] & $0F) * 4) - (((BYTE[pkt][TCP_hdrflags] & $F0) >> 4) * 4)
 
+  bytemove(@seq, pkt + TCP_seqnum, 4)
+  seq:=conv_endianlong(seq)
+
   if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     reject_tcp
     abort handle_addr
@@ -353,11 +356,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     BYTE[handle_addr + sConState] := SESTABLISHED
     LONG[handle_addr + sAge] := long[RTCADDR]
 
-    ifnot BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+    if seq==LONG[handle_addr + sMyAckNum]
       ' copy data to buffer
       if \q.pushData(BYTE[handle_addr+sSockQRx],pkt+TCP_data,datain_len) > 0
         ' recalculate ack Num
-        LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
+        LONG[handle_addr + sMyAckNum]+=datain_len
        
     ' Send an ACK
     send_tcppacket(handle_addr,TCP_ACK,0,0)
@@ -365,11 +368,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' We got a server response, so we ACK it
 
-    bytemove(handle_addr + sMySeqNum, pkt + TCP_acknum, 4)
-    bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
-    
-    LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
 
+    LONG[handle_addr+sMyAckNum]:=seq+1
+
+    bytemove(handle_addr + sMySeqNum, pkt + TCP_acknum, 4)
+    LONG[handle_addr+sMySeqNum]:=conv_endianlong(LONG[handle_addr+sMySeqNum])
 
     ' ACK response
     send_tcppacket(handle_addr,TCP_ACK,0,0)
@@ -385,20 +388,18 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     bytemove(handle_addr + sSrcMac, pkt + enetpacketSrc0, 6)
 
     ' copy ip, port data
-    bytemove(handle_addr + sSrcIp, pkt + ip_srcaddr, 4)
-    bytemove(handle_addr + sSrcPort, pkt + TCP_srcport, 2)
-    bytemove(handle_addr + sDstPort, pkt + TCP_destport, 2)
+    LONG[handle_addr+sSrcIp]:= srcip
+    WORD[handle_addr+sDstPort]:= dstport
+    WORD[handle_addr+sSrcPort]:= srcport
 
     ' get updated ack numbers
-    bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
-
-    LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+    LONG[handle_addr+sMyAckNum]:=seq+1
     LONG[handle_addr + sMySeqNum] := randseed?               ' Initial seq num (random)
 
     send_tcppacket(handle_addr,TCP_SYN|TCP_ACK,0,0)
 
     ' incremement the sequence number for the next packet (it will be for an established connection)                                          
-    LONG[handle_addr + sMySeqNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMySeqNum]) + 1)
+    LONG[handle_addr + sMySeqNum]++
 
     ' set socket state, waiting for establish
     LONG[handle_addr + sAge] := long[RTCADDR]
@@ -408,15 +409,15 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' Reply to FIN with ACK
       
     ' We only want to ACK a FIN if we have received everything up to this point.
-    if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
+    if seq<>LONG[handle_addr + sMyAckNum]
       send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort  ' Bad sequence Num!
 
     ' get updated sequence and ack numbers (gaurantee we have correct ones to kill connection with)
     bytemove(handle_addr + sMySeqNum, pkt + TCP_acknum, 4)
-    bytemove(handle_addr + sMyAckNum, pkt + TCP_seqnum, 4)
                                               
-    LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+    LONG[handle_addr+sMyAckNum]:=seq+1
+    LONG[handle_addr+sMySeqNum]:=conv_endianlong(LONG[handle_addr+sMySeqNum])
 
     send_tcppacket(handle_addr,TCP_RST,0,0)
 
@@ -490,7 +491,7 @@ PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
   if WORD[handle_addr + sLastWindow]<MIN_ADVERTISED_WINDOW
     WORD[handle_addr + sLastWindow]:=0
    
-  compose_tcp_header(conv_endianword(WORD[handle_addr + sSrcPort]),conv_endianword(WORD[handle_addr + sDstPort]),conv_endianlong(LONG[handle_addr + sMySeqNum]),conv_endianlong(LONG[handle_addr + sMyAckNum]),flags,WORD[handle_addr + sLastWindow],hdr_chksum)
+  compose_tcp_header(WORD[handle_addr + sSrcPort],WORD[handle_addr + sDstPort],LONG[handle_addr + sMySeqNum],LONG[handle_addr + sMyAckNum],flags,WORD[handle_addr + sLastWindow],hdr_chksum)
   if datalen > 0
     nic.wr_frame_data(data,datalen)
 
@@ -500,7 +501,7 @@ PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
 
   nic.send_frame
 
-  LONG[handle_addr + sMySeqNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMySeqNum]) + datalen)               ' update running sequence number
+  LONG[handle_addr + sMySeqNum]+= datalen               ' update running sequence number
     
 
 PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
@@ -513,9 +514,9 @@ PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   repeat handle from 0 to constant(sNumSockets - 1)
     handle_addr := @sSockets + (sSocketBytes * handle)   ' generate handle address (mapped to memory)
     if BYTE[handle_addr + sConState] <> SCLOSED
-      if (LONG[handle_addr + sSrcIp] == 0) OR (LONG[handle_addr + sSrcIp] == conv_endianlong(srcip))
+      if (LONG[handle_addr + sSrcIp] == 0) OR (LONG[handle_addr + sSrcIp] == srcip)
         ' ip match, ip socket srcip = 0, then will try to match dst port (find listening socket)
-          if (WORD[handle_addr + sDstPort] == conv_endianword(dstport)) AND (WORD[handle_addr + sSrcPort] == 0 OR WORD[handle_addr + sSrcPort] == conv_endianword(srcport))
+          if (WORD[handle_addr + sDstPort] == dstport) AND (WORD[handle_addr + sSrcPort] == 0 OR WORD[handle_addr + sSrcPort] == srcport)
             ' port match, will match port, if srcport = 0 then will match dstport only (find listening socket)
             return handle
     elseif srcip == 0
@@ -575,7 +576,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     elseif state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
       ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
 
-      LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
+      LONG[handle_addr + sMyAckNum] ++
 
       send_tcppacket(handle_addr,TCP_RST,0,0)
 
@@ -602,8 +603,6 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       BYTE[handle_addr + sConState] := SSYNSENT
       LONG[handle_addr + sAge] := long[RTCADDR]
       
-
-  'sFlags &= !SEND_WAITING
 
 PRI arp_request_checkgateway(handle_addr) | ip_ptr
 
@@ -673,17 +672,17 @@ PUB listen(port) | handle, handle_addr, x
   ' Start with a clean slate
   bytefill(handle_addr,0,sSocketBytes)
 
-  WORD[handle_addr + sSrcPort] := 0                     ' no source port yet
-  WORD[handle_addr + sDstPort] := conv_endianword(port) ' we do have a dest port though
-
   LONG[handle_addr + sAge] := long[RTCADDR]
   BYTE[handle_addr + sSockQTx] := q.new
   if (x:=\q.new)<0
-    q.delete(BYTE[handle_addr + sSockQTx])
+    q.delete(BYTE[handle_addr + sSockQTx]~)
     return -1
   else
     BYTE[handle_addr + sSockQRx] := x
-  
+
+  WORD[handle_addr + sSrcPort] := 0                     ' no source port yet
+  WORD[handle_addr + sDstPort] := port ' we do have a dest port though
+
   ' it's now listening
   BYTE[handle_addr + sConState] := SLISTEN
 
@@ -705,17 +704,18 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   ' Start with a clean slate
   bytefill(handle_addr,0,sSocketBytes)
   
-  ' copy in ip, port data (with respect to the remote host, since we use same code as server)
-  LONG[handle_addr + sSrcIp] := LONG[ip]
-  WORD[handle_addr + sSrcPort] := conv_endianword(remoteport)
-  WORD[handle_addr + sDstPort] := conv_endianword(localport)
-
   BYTE[handle_addr + sSockQTx] := q.new
   if (x:=\q.new)<0
-    q.delete(BYTE[handle_addr + sSockQTx])
+    q.delete(BYTE[handle_addr + sSockQTx]~)
     return -1
   else
     BYTE[handle_addr + sSockQRx] := x
+
+  ' copy in ip, port data (with respect to the remote host, since we use same code as server)
+  LONG[handle_addr + sSrcIp] := LONG[ip]
+  WORD[handle_addr + sSrcPort] := remoteport
+  WORD[handle_addr + sDstPort] := localport
+
   LONG[handle_addr + sAge] := long[RTCADDR]
 
   BYTE[handle_addr + sConState] := SCONNECTINGARP1
