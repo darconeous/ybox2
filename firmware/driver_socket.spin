@@ -31,16 +31,13 @@ CON
   apiversion = 3
   RTCADDR = $7A00
 
-' Circular Buffer constants
-  buffer_length = 1024 ' MUST BE A POWER OF TWO.
-  buffer_mask   = buffer_length - 1
-
 OBJ
   nic : "driver_enc28j60"
   random   : "RealRandom"
   settings : "settings"
 '  term     : "TV_Text"
 '  subsys   : "subsys"
+  q : "qring"
 DAT
 ' Don't set any of these values by hand!
 ' Use the associated setting keys instead.
@@ -88,7 +85,8 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 ''               Must be in order: ip_addr. ip_subnet, ip_gateway, ip_dns
 
   stop
-
+  q.init
+  
   random.start
   randseed := random.random
   random.stop
@@ -119,29 +117,29 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
   pkt := nic.get_packetpointer
 
     
-  i~
+  i := 0
   linkstat:=nic.isLinkUp
 
   if linkstat  
-    \dhcp_process
+    dhcp_process
 
   repeat
     ifnot nic.isLinkUp
       repeat while NOT nic.isLinkUp
-      \dhcp_rebind
+      dhcp_rebind
       
     nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
     pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
     if pkt_count > 0
-      \service_packet            ' handle packet
+      service_packet            ' handle packet
 
-    \dhcp_process
+    dhcp_process
     ++i
     
     if has_valid_ip_addr AND i > 2
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
-      \tick_tcpsend
-      i~
+      tick_tcpsend
+      i := 0
 
 PRI service_packet
   ' lets process this frame
@@ -336,10 +334,10 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
-  if (handle_addr := \find_socket(srcip, dstport, srcport))==-1
+  if (handle := \find_socket(srcip, dstport, srcport))==-1
     reject_tcp
-    abort handle_addr
-  handle := BYTE[handle_addr + sSockIndex]
+    abort -1
+  handle_addr := @sSockets + (sSocketBytes * handle)
 
   ' at this point we assume we have an active socket, or a socket available to be used
   datain_len := ((BYTE[pkt][ip_pktlen] << 8) + BYTE[pkt][constant(ip_pktlen + 1)]) - ((BYTE[pkt][ip_vers_len] & $0F) * 4) - (((BYTE[pkt][TCP_hdrflags] & $F0) >> 4) * 4)
@@ -356,38 +354,37 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
     if BYTE[handle_addr + sMyAckNum][0] <> BYTE[pkt+TCP_seqnum][0] OR BYTE[handle_addr + sMyAckNum][1] <> BYTE[pkt+TCP_seqnum][1] OR BYTE[handle_addr + sMyAckNum][2] <> BYTE[pkt+TCP_seqnum][2] OR BYTE[handle_addr + sMyAckNum][3] <> BYTE[pkt+TCP_seqnum][3]
       ' ACK response
-      if LONG[handle_addr + sNxtAck] < 0
-        send_tcppacket(handle_addr,TCP_ACK,0,0)
+      'if LONG[handle_addr + sNxtAck] < 0
+      send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort  ' Bad sequence Num!
 
-    if datain_len > buffer_length
-      ' ACK response
-      if LONG[handle_addr + sNxtAck] < 0
-        send_tcppacket(handle_addr,TCP_ACK,0,0)
-      abort
-
-    head_work := WORD[@rx_head][handle]
-
     ' copy data to buffer
-    repeat i from 0 to datain_len - 1
-      if (WORD[@rx_tail][handle] <> (head_work + 1) & buffer_mask)
-        ptr := @rx_buffer + (handle * buffer_length)  
-        byte[ptr][head_work] := BYTE[pkt][TCP_data + i]
-        head_work := (head_work + 1) & buffer_mask
-      else
-        ' ACK response
-        if LONG[handle_addr + sNxtAck] < 0
-          send_tcppacket(handle_addr,TCP_ACK,0,0)
-        abort  ' out of space!
+    if \q.pushData(BYTE[handle_addr+sSockQRx],pkt+TCP_data,datain_len) < 0
+      ' ACK response
+      'if LONG[handle_addr + sNxtAck] < 0
+      send_tcppacket(handle_addr,TCP_ACK,0,0)
+      abort
+    
+    
+    'repeat i from 0 to datain_len - 1
+    '  if (WORD[@rx_tail][handle] <> (head_work + 1) & buffer_mask)
+    '    ptr := @rx_buffer + (handle * buffer_length)  
+    '    byte[ptr][head_work] := BYTE[pkt][TCP_data + i]
+    '    head_work := (head_work + 1) & buffer_mask
+    '  else
+    '    ' ACK response
+    '    if LONG[handle_addr + sNxtAck] < 0
+    '      send_tcppacket(handle_addr,TCP_ACK,0,0)
+    '    abort  ' out of space!
 
-    if LONG[handle_addr + sNxtAck] < 0
-      LONG[handle_addr + sNxtAck]:=datain_len 
+    'if LONG[handle_addr + sNxtAck] < 0
+    LONG[handle_addr + sNxtAck]:=datain_len 
 
-    WORD[@rx_head][handle]:=head_work
-
+    'WORD[@rx_head][handle]:=head_work
  
     ' recalculate ack Num
     LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + datain_len)
+    send_tcppacket(handle_addr,TCP_ACK,0,0)
 
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
     ' We got a server response, so we ACK it
@@ -449,9 +446,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     send_tcppacket(handle_addr,TCP_RST,0,0)
 
     ' set socket state, now free
-    bytefill(handle_addr,0,sSocketBytes-1)
-    BYTE[handle_addr + sConState] := SCLOSED
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
+    \q.delete(BYTE[handle_addr + sSockQRx]~)
+    bytefill(handle_addr,0,sSocketBytes)
     LONG[handle_addr + sAge] := long[RTCADDR]
+    BYTE[handle_addr + sConState] := SCLOSED
     'resetBuffers(handle)
     
   elseif (BYTE[handle_addr + sConState] == SSYNSENT) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0
@@ -463,14 +462,17 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   elseif (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_RST) > 0
 
     ' Reset, reset states
-    bytefill(handle_addr,0,sSocketBytes-1)
-    BYTE[handle_addr + sConState] := SCLOSED
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
+    \q.delete(BYTE[handle_addr + sSockQRx]~)
+    bytefill(handle_addr,0,sSocketBytes)
     LONG[handle_addr + sAge] := long[RTCADDR]
+    BYTE[handle_addr + sConState] := SCLOSED
     'resetBuffers(handle)
 
-PRI reject_tcp | dstport,srcport,seq,ack,chksum
+PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   bounce_unreachable(3)
 
+  'srcip := BYTE[pkt][ip_srcaddr] << 24 + BYTE[pkt][constant(ip_srcaddr + 1)] << 16 + BYTE[pkt][constant(ip_srcaddr + 2)] << 8 + BYTE[pkt][constant(ip_srcaddr + 3)]
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -511,7 +513,8 @@ PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
   compose_ethernet_header(handle_addr + sSrcMac,@local_macaddr,$0800)
   hdr_chksum:=compose_ip_header(PROT_TCP,handle_addr + sSrcIp,@ip_addr)
   hdr_chksum+=TCP_data-TCP_srcport+datalen
-  compose_tcp_header(conv_endianword(WORD[handle_addr + sSrcPort]),conv_endianword(WORD[handle_addr + sDstPort]),conv_endianlong(LONG[handle_addr + sMySeqNum]),conv_endianlong(LONG[handle_addr + sMyAckNum]),flags,buffer_length,hdr_chksum)
+  WORD[handle_addr + sLastWindow]:= q.bytesFree(BYTE[handle_addr + sSockQRx])
+  compose_tcp_header(conv_endianword(WORD[handle_addr + sSrcPort]),conv_endianword(WORD[handle_addr + sDstPort]),conv_endianlong(LONG[handle_addr + sMySeqNum]),conv_endianlong(LONG[handle_addr + sMyAckNum]),flags,WORD[handle_addr + sLastWindow],hdr_chksum)
   if datalen > 0
     nic.wr_frame_data(data,datalen)
 
@@ -526,7 +529,7 @@ PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
 
 PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   ' Search for socket, matches ip address, port states
-  ' Returns handle address (start memory location of socket)
+  ' Returns handle number
   '  If no matches, will abort with -1
   '  If supplied with srcip = 0 then will return free unused handle, aborts with -1 if none avail
   
@@ -538,10 +541,10 @@ PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
         ' ip match, ip socket srcip = 0, then will try to match dst port (find listening socket)
           if (WORD[handle_addr + sDstPort] == conv_endianword(dstport)) AND (WORD[handle_addr + sSrcPort] == 0 OR WORD[handle_addr + sSrcPort] == conv_endianword(srcport))
             ' port match, will match port, if srcport = 0 then will match dstport only (find listening socket)
-            return handle_addr
+            return handle
     elseif srcip == 0
       ' we only return a free handle if we are searching for srcip = 0 (just looking for free handle)
-      free_handle := handle_addr     ' we found a free handle, may need this later
+      free_handle := handle     ' we found a free handle, may need this later
       
   if free_handle <> -1
     return free_handle 
@@ -564,25 +567,28 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     if state == SESTABLISHED OR state == SCLOSING
       ' Check to see if we have data to send, if we do, send it
       ' If we have hit out next ack marker, send an ACK
-        
-      if WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
+
+      if NOT q.isEmpty(BYTE[handle_addr+sSockQTx])'WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
         i := 0
-        ptr := @tx_buffer + (handle * buffer_length)
+        'ptr := @tx_buffer + (handle * buffer_length)
         repeat
-          BYTE[pkt][TCP_data + i] := byte[ptr][WORD[@tx_tail][handle]]
-          WORD[@tx_tail][handle] := (WORD[@tx_tail][handle] + 1) & buffer_mask
+          BYTE[pkt][TCP_data + i] := q.pull(BYTE[handle_addr+sSockQTx])
+'          BYTE[pkt][TCP_data + i] := byte[ptr][WORD[@tx_tail][handle]]
+'          WORD[@tx_tail][handle] := (WORD[@tx_tail][handle] + 1) & buffer_mask
           ++i
-        while WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
+        while NOT q.isEmpty(BYTE[handle_addr+sSockQTx])'WORD[@tx_tail][handle] <> WORD[@tx_head][handle]
         send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt+TCP_data,i)
+      elseif   WORD[handle_addr + sLastWindow]<>q.bytesFree(BYTE[handle_addr + sSockQRx])
+        send_tcppacket(handle_addr,TCP_ACK,0,0)
       elseif LONG[handle_addr + sNxtAck] == 0
         LONG[handle_addr + sNxtAck]--  
         send_tcppacket(handle_addr,TCP_ACK,0,0)
-      
+  
     if state == SSYNSENT AND (long[RTCADDR]-LONG[handle_addr + sAge]>5)
       ' If we haven't gotten back an ACK 5 seconds after sending the SYN, forget about it
       send_tcppacket(handle_addr,TCP_RST,0,0)
 
-      bytefill(handle_addr,0,sSocketBytes-1)
+      bytefill(handle_addr,0,sSocketBytes)
       LONG[handle_addr + sConState] := SCLOSED
       LONG[handle_addr + sAge] := long[RTCADDR]
 
@@ -593,7 +599,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       ' set socket state, now free
       LONG[handle_addr + sAge] := long[RTCADDR]
       BYTE[handle_addr + sConState] := SCLOSING2
-    if state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
+    elseif state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
       ' Force connection close, I'll just RST it (bad I know, but it ensures closing...)
 
       LONG[handle_addr + sMyAckNum] := conv_endianlong(conv_endianlong(LONG[handle_addr + sMyAckNum]) + 1)
@@ -601,11 +607,13 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       send_tcppacket(handle_addr,TCP_RST,0,0)
 
       ' set socket state, now free
-      bytefill(handle_addr,0,sSocketBytes-1)
-      BYTE[handle_addr + sConState] := SCLOSED
+      \q.delete(BYTE[handle_addr + sSockQTx]~)
+      \q.delete(BYTE[handle_addr + sSockQRx]~)
+      bytefill(handle_addr,0,sSocketBytes)
       LONG[handle_addr + sAge] := long[RTCADDR]
-
-    if state == SCONNECTINGARP1
+      BYTE[handle_addr + sConState] := SCLOSED
+       
+    elseif state == SCONNECTINGARP1
       ' We need to send an arp request
 
       arp_request_checkgateway(handle_addr)
@@ -676,43 +684,54 @@ PRI conv_endianword(in)
 ' ************************************
 ' ** Public Accessors (Thread Safe) **
 ' ************************************
-PUB listen(port) | handle_addr
+PUB listen(port) | handle, handle_addr, x
 '' Sets up a socket for listening on a port
 '' Returns handle if available, -1 if none available
 '' Nonblocking
 
   ' just find any avail closed socket
-  handle_addr := \find_socket(0, 0, 0)
+  handle := \find_socket(0, 0, 0)
+  
+  if handle < 0
+    return -1
 
-  if handle_addr < 0
-    return -1               
+  handle_addr := @sSockets + (sSocketBytes * handle)
 
   ' Start with a clean slate
-  bytefill(handle_addr,0,sSocketBytes-1)
+  bytefill(handle_addr,0,sSocketBytes)
 
   LONG[handle_addr + sNxtAck]:=-1 
   WORD[handle_addr + sSrcPort] := 0                     ' no source port yet
   WORD[handle_addr + sDstPort] := conv_endianword(port) ' we do have a dest port though
 
+  LONG[handle_addr + sAge] := long[RTCADDR]
+  BYTE[handle_addr + sSockQTx] := q.new
+  if (x:=\q.new)<0
+    q.delete(BYTE[handle_addr + sSockQTx])
+    return -1
+  else
+    BYTE[handle_addr + sSockQRx] := x
+  
   ' it's now listening
   BYTE[handle_addr + sConState] := SLISTEN
-  LONG[handle_addr + sAge] := long[RTCADDR]
 
-  return BYTE[handle_addr + sSockIndex] 
+  return handle 
 
-PUB connect(ip, remoteport, localport) | handle_addr
+PUB connect(ip, remoteport, localport) | handle, handle_addr,x
 '' Connect to remote host
 '' Returns handle to new socket, -1 if no socket available
 '' Nonblocking
 
   ' just find any avail closed socket
-  handle_addr := \find_socket(0, 0, 0)
+  handle := \find_socket(0, 0, 0)
 
-  if handle_addr < 0
+  if handle < 0
     return -1
 
+  handle_addr := @sSockets + (sSocketBytes * handle)
+
   ' Start with a clean slate
-  bytefill(handle_addr,0,sSocketBytes-1)
+  bytefill(handle_addr,0,sSocketBytes)
   
   ' copy in ip, port data (with respect to the remote host, since we use same code as server)
   LONG[handle_addr + sNxtAck] := -1 
@@ -720,10 +739,17 @@ PUB connect(ip, remoteport, localport) | handle_addr
   WORD[handle_addr + sSrcPort] := conv_endianword(remoteport)
   WORD[handle_addr + sDstPort] := conv_endianword(localport)
 
-  BYTE[handle_addr + sConState] := SCONNECTINGARP1
+  BYTE[handle_addr + sSockQTx] := q.new
+  if (x:=\q.new)<0
+    q.delete(BYTE[handle_addr + sSockQTx])
+    return -1
+  else
+    BYTE[handle_addr + sSockQRx] := x
   LONG[handle_addr + sAge] := long[RTCADDR]
+
+  BYTE[handle_addr + sConState] := SCONNECTINGARP1
   
-  return BYTE[handle_addr + sSockIndex]
+  return handle
 
 PUB close(handle) | handle_addr
 '' Closes a connection
@@ -732,10 +758,14 @@ PUB close(handle) | handle_addr
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
     repeat while BYTE[handle_addr + sConState]==SCLOSING
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
+    \q.delete(BYTE[handle_addr + sSockQRx]~)
   else
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
+    \q.delete(BYTE[handle_addr + sSockQRx]~)
     bytefill(handle_addr,0,sSocketBytes-1)
-    BYTE[handle_addr + sConState] := SCLOSED
     LONG[handle_addr + sAge] := long[RTCADDR]
+    BYTE[handle_addr + sConState] := SCLOSED
     resetBuffers(handle)
 
 PUB closeall | handle
@@ -754,7 +784,8 @@ PUB isEOF(handle) | handle_addr
   handle_addr := @sSockets + (sSocketBytes * handle)
   if BYTE[handle_addr + sConState] == SESTABLISHED
     return false
-  return WORD[@rx_tail][handle] == WORD[@rx_head][handle]
+  return q.isEmpty(BYTE[handle_addr + sSockQRx])
+  'return WORD[@rx_tail][handle] == WORD[@rx_head][handle]
 
 PUB isValidHandle(handle) | handle_addr
 '' Checks to see if the handle is valid, handles will become invalid once they are used
@@ -768,7 +799,9 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will not block (returns -1 if no byte avail)
 
-  rxbyte~~
+  return \q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])
+{
+  rxbyte := -1
   if WORD[@rx_tail][handle] <> WORD[@rx_head][handle]
     ptr := @rx_buffer + (handle * buffer_length)
     rxbyte := byte[ptr][WORD[@rx_tail][handle]]
@@ -777,7 +810,7 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
     ptr := @sSockets + (sSocketBytes * handle)
     if LONG[ptr + sNxtAck] > 0
       LONG[ptr + sNxtAck]--  
-    
+}    
     
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
@@ -789,6 +822,9 @@ PUB writeByteNonBlocking(handle, txbyte) | ptr
 '' Writes a byte to the specified socket
 '' Will not block (returns -1 if no buffer space available)
 
+  return \q.push(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],txbyte)
+  
+{
   ifnot (WORD[@tx_tail][handle] <> (WORD[@tx_head][handle] + 1) & buffer_mask)
     return -1
 
@@ -797,7 +833,7 @@ PUB writeByteNonBlocking(handle, txbyte) | ptr
   WORD[@tx_head][handle] := (WORD[@tx_head][handle] + 1) & buffer_mask
 
   return txbyte
-
+}
 PUB writeByte(handle, txbyte)
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
@@ -807,8 +843,8 @@ PUB writeByte(handle, txbyte)
 PUB resetBuffers(handle)
 '' Resets send/receive buffers for the specified socket
 
-  WORD[@rx_tail][handle] := WORD[@rx_head][handle]
-  WORD[@tx_head][handle] := WORD[@tx_tail][handle]    
+'  WORD[@rx_tail][handle] := WORD[@rx_head][handle]
+'  WORD[@tx_head][handle] := WORD[@tx_tail][handle]    
 
 CON
 ' The following is an 'array' that represents all the socket handle data (with respect to the remote host)
@@ -826,7 +862,7 @@ CON
 '         1 byte  - (1 byte ) handle index
 ' total: 32 bytes
 
-  sSocketBytes  = 32      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
+  sSocketBytes  = 36      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
   
   sNumSockets = 2         ' number of sockets
 
@@ -838,10 +874,12 @@ CON
   sSrcPort = 16
   sDstPort = 18
   sNxtAck = 20
-  sConState = 24
-  sSrcMac = 25
+  sLastWindow = 24
+  sConState = 26
+  sSrcMac = 27
 
-  sSockIndex = 31
+  sSockQTx = 33
+  sSockQRx = 34
 
 ' Socket states (user should never touch these)
   SCLOSED = 0                   ' closed, handle not used
@@ -857,18 +895,7 @@ CON
 
 DAT
               long      0       ' long align the socket state data
-sSockets      byte      0[sSockIndex],0           ' [0] socket 1 (last byte denotes handle index)
-              byte      0[sSockIndex],1           ' [1] socket 2 (last byte denotes handle index)
-
-DAT
-' Circular buffer variables (one word per socket)
-rx_head       word      0[sNumSockets]
-rx_tail       word      0[sNumSockets]
-tx_head       word      0[sNumSockets]
-tx_tail       word      0[sNumSockets]
-
-tx_buffer     byte 0 [buffer_length*sNumSockets] 
-rx_buffer     byte 0 [buffer_length*sNumSockets]
+sSockets      byte      0[sSocketBytes*sNumSockets]
 
 
 CON
@@ -966,8 +993,6 @@ CON
   UDP_len = UDP_destport+2
   UDP_cksum = UDP_len+2
   UDP_data = UDP_cksum+2
-
-
 
 
 DAT
