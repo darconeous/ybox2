@@ -749,11 +749,19 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
 
   return \q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])
     
+PUB readByteTimeout(handle,ms) : rxbyte | ptr,t
+'' Read a byte from the specified socket
+'' Will block until a byte is received
+'' or a timeout occurs
+
+  t := cnt
+  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
+    if (cnt - t) / (clkfreq / 1000) > ms
+      abort -1
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will block until a byte is received
-
-  repeat while (rxbyte := readByteNonBlocking(handle)) < 0
+  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
 
 PUB writeByteNonBlocking(handle, txbyte) | ptr
 '' Writes a byte to the specified socket
@@ -765,7 +773,9 @@ PUB writeByte(handle, txbyte)
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
 
-  repeat while writeByteNonBlocking(handle, txbyte) < 0
+  repeat while writeByteNonBlocking(handle, txbyte) == q#ERR_Q_FULL
+    ifnot isValidHandle(handle)
+      abort -1
 
 CON
 ' The following is an 'array' that represents all the socket handle data (with respect to the remote host)

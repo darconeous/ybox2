@@ -169,6 +169,8 @@ PUB init | i, tv_mode
   repeat
     \httpServer
     term.str(string("WEBSERVER EXCEPTION",13))
+    subsys.ChirpSad
+    subsys.ChirpSad
 PRI resetSettings | key, nextKey, ledconf
 '' Preforms a "factory reset" by removing all
 '' settings except those used for device identification
@@ -383,12 +385,14 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
     repeat while NOT websocket.waitConnectTimeout(100)
       buttonCheck
       
-    http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
+      websocket.close
+      next
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
 
-    repeat while http.getNextHeader(websocket.handle,@httpHeader,32,@buffer,128)
+    repeat while \http.getNextHeader(websocket.handle,@httpHeader,32,@buffer,128)>0
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
         contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))

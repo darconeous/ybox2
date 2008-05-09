@@ -1,6 +1,7 @@
 obj
-'  tcp : "shove"
   tcp : "driver_socket"
+CON
+  TIMEOUT       = 5000
 pub getFieldFromQuery(packeddataptr,keystring,outvalue,outsize) | i,char
   i:=0
   repeat while BYTE[packeddataptr]
@@ -49,20 +50,19 @@ pub unescapeURLInPlace(in_ptr) | out_ptr,char,val
     byte[out_ptr++]:=char
   byte[out_ptr++]:=0
   return TRUE
-pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen) | count,char
-  count:=0
+pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen): count|char
   valueLen--
   nameLen--
   repeat while not tcp.isEOF(handle)
-    char:=tcp.readByte(handle)
+    char:=tcp.readByteTimeout(handle,TIMEOUT)
     case char
       13:
-        tcp.readByte(handle)
+        tcp.readByteTimeout(handle,TIMEOUT)
         return count
       10,-1:
         return count
       ":":
-        tcp.readByte(handle)
+        tcp.readByteTimeout(handle,TIMEOUT)
         count++
         byte[namePtr]:=0
         quit
@@ -72,11 +72,11 @@ pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen) | count,char
           nameLen--
           byte[namePtr++]:=char
   repeat while not tcp.isEOF(handle)
-    char:=tcp.readByte(handle)
+    char:=tcp.readByteTimeout(handle,TIMEOUT)
     case char
       13,10,-1:
         byte[valuePtr]:=0
-        tcp.readByte(handle)
+        tcp.readByteTimeout(handle,TIMEOUT)
         return count
       other:
         count++
@@ -87,14 +87,14 @@ pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen) | count,char
   byte[valuePtr]:=0
 pub parseRequest(handle,method,path,query) | i,char
     i:=0
-    repeat while ((char:=tcp.readByte(handle)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<7
+    repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<7
       BYTE[method][i]:=char
       if char == " "
         quit
       i++
     BYTE[method][i]:=0
     i:=0
-    repeat while ((char:=tcp.readByte(handle)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
+    repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
       BYTE[path][i]:=char
       if char == " " OR char == "?"  OR char == "#"
         quit
@@ -104,7 +104,7 @@ pub parseRequest(handle,method,path,query) | i,char
       ' If we stopped on a question mark, then grab the query
       BYTE[path][i]:=0
       i:=0
-      repeat while ((char:=tcp.readByte(handle)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
+      repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
         BYTE[query][i]:=char
         if char == " " OR char == "#" OR char == 13
           quit

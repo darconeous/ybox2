@@ -6,6 +6,7 @@ CON
   Q_SIZE = 512
   buffer_mask   = Q_SIZE - 1
 CON
+  ERR_Q_FULL       = -1
   ERR_Q_EMPTY       = -5
   ERR_Q_INVALID     = -3
   ERR_OUT_OF_PAGES  = -2
@@ -78,7 +79,7 @@ PUB push(i,b) | p
     buffer[i*Q_SIZE+writepoint[i]+1]:=b
     writepoint[i] := (writepoint[i] + 1) & buffer_mask
   else   
-    abort -1
+    abort ERR_Q_FULL
 
   return 1
        
