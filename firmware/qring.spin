@@ -82,6 +82,30 @@ PUB push(i,b) | p
 
   return 1
        
+    
+PUB pushData(i,ptr,len)
+  if bytesFree(i)<len
+    abort -1
+
+  i--
+  if i<0 OR i=>Q_MAX
+    abort ERR_Q_INVALID
+
+  if len+writepoint[i]>Q_SIZE
+    bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, Q_SIZE-writepoint[i])
+    ptr+=Q_SIZE-writepoint[i]
+    bytemove(@buffer+i*Q_SIZE+1, ptr, len-(Q_SIZE-writepoint[i]))
+    writepoint[i] := (writepoint[i] + len) & buffer_mask
+  else
+    bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, len)
+    writepoint[i] := (writepoint[i] + len) & buffer_mask
+  {
+  repeat while len--
+    push(i,byte[ptr])
+    ptr++
+  }
+  return 1  
+
 PUB pull(i) : val | p
   i--
   if i<0 OR i=>Q_MAX
@@ -92,14 +116,7 @@ PUB pull(i) : val | p
     readpoint[i] := (readpoint[i] + 1) & buffer_mask
   else
     abort ERR_Q_EMPTY
-    
-PUB pushData(i,ptr,len)
-  if bytesFree(i)<len
-    abort -1
-  repeat while len--
-    push(i,byte[ptr])
-    ptr++
-  return 1  
+
 PUB isEmpty(i)
   ifnot i
     return TRUE

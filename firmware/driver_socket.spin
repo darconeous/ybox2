@@ -1,28 +1,15 @@
 {{
   Ethernet TCP/IP Socket Driver
-  $Id$
   ----------------------------- 
-  (c) 2007 Harrison Pham.
-
+  Original code (c) 2007,2008 Harrison Pham.
+  Modifications (c) 2008 Robert Quattlebaum
 }}
 
-{{
-  This file is part of PropTCP.
-   
-  PropTCP is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-   
-  PropTCP is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-   
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-}}
-
+OBJ
+  nic : "driver_enc28j60"
+  random   : "RealRandom"
+  settings : "settings"
+  q : "qring"
 
 CON
   _clkmode = xtal1 + pll16x
@@ -30,15 +17,8 @@ CON
   version = 1.3
   apiversion = 3
   RTCADDR = $7A00
-  MIN_ADVERTISED_WINDOW =        256
+  MIN_ADVERTISED_WINDOW = q#Q_SIZE/2
   
-OBJ
-  nic : "driver_enc28j60"
-  random   : "RealRandom"
-  settings : "settings"
-'  term     : "TV_Text"
-'  subsys   : "subsys"
-  q : "qring"
 DAT
 ' Don't set any of these values by hand!
 ' Use the associated setting keys instead.
@@ -117,7 +97,6 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
     
   pkt := nic.get_packetpointer
 
-    
   i := 0
   linkstat:=nic.isLinkUp
 
@@ -450,8 +429,9 @@ PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
   bytemove(@seq, pkt + TCP_acknum, 4)
-  bytemove(@ack, pkt + TCP_seqnum, 4)
   seq:=conv_endianlong(seq)
+
+  bytemove(@ack, pkt + TCP_seqnum, 4)
   ack:=conv_endianlong(ack)+1
   
   nic.start_frame
