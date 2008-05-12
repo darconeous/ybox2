@@ -128,6 +128,7 @@ PUB init | i
     term.str(string("HTTP SERVER EXCEPTION "))
     term.dec(i)
     term.out(13)
+    socket.closeall
     
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    

@@ -1,7 +1,7 @@
 obj
   tcp : "driver_socket"
 CON
-  TIMEOUT       = 5000
+  TIMEOUT       = 1000
 pub getFieldFromQuery(packeddataptr,keystring,outvalue,outsize) | i,char
   i:=0
   repeat while BYTE[packeddataptr]

@@ -3,7 +3,7 @@
 }}
 CON
   Q_MAX = 4
-  Q_SIZE = 512
+  Q_SIZE = 512   ' MUST BE A POWER OF TWO
   buffer_mask   = Q_SIZE - 1
 CON
   ERR_Q_FULL       = -1
@@ -14,7 +14,7 @@ CON
   ERR_RUNTIME       = -10
 
 DAT
-  buffer byte 255[Q_MAX*Q_SIZE+1]
+  buffer byte 0[Q_MAX*Q_SIZE+1]
   writepoint  word 0[Q_MAX]
   readpoint    word 0[Q_MAX]
   
@@ -86,11 +86,9 @@ PUB push(i,b) | p
     
 PUB pushData(i,ptr,len)
   if bytesFree(i)<len
-    abort -1
+    abort ERR_Q_FULL
 
   i--
-  if i<0 OR i=>Q_MAX
-    abort ERR_Q_INVALID
 
   if len+writepoint[i]>Q_SIZE
     bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, Q_SIZE-writepoint[i])
@@ -100,11 +98,7 @@ PUB pushData(i,ptr,len)
   else
     bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, len)
     writepoint[i] := (writepoint[i] + len) & buffer_mask
-  {
-  repeat while len--
-    push(i,byte[ptr])
-    ptr++
-  }
+
   return 1  
 
 PUB pull(i) : val | p

@@ -5,9 +5,6 @@
         Designed for use with a 64KB EEPROM. It will not work
         properly with a 32KB EEPROM.
 
-        If your pin assignments are different, you'll need to
-        change them here and in the subsys object.
-
 }}
 CON
 
@@ -24,11 +21,13 @@ OBJ
   random        : "RealRandom"
   base64        : "base64"
   http          : "http"
+  md5           : "md5"
 VAR
+  long stage_two
   long stack[10] 
-  byte stage_two
+  byte hash[md5#HASH_LENGTH]
 DAT
-productName   BYTE      "ybox2 bootloader v0.9",0      
+productName   BYTE      "ybox2 bootloader v1.0",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
@@ -170,7 +169,8 @@ PUB init | i, tv_mode
     \httpServer
     term.str(string("WEBSERVER EXCEPTION",13))
     subsys.ChirpSad
-    subsys.ChirpSad
+    websocket.closeall
+    
 PRI resetSettings | key, nextKey, ledconf
 '' Preforms a "factory reset" by removing all
 '' settings except those used for device identification
@@ -313,6 +313,7 @@ pri buttonCheck
     
   
 VAR
+  long align
   byte buffer [128]
   byte buffer2 [128]
   byte httpMethod[8]
@@ -348,15 +349,6 @@ STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
-pri httpOutputLink(url,class,content)
-  websocket.str(string("<a href='"))
-  websocket.strxml(url)
-  if class
-    websocket.str(string("' class='"))
-    websocket.strxml(class)
-  websocket.str(string("'>"))
-  websocket.str(content)
-  websocket.str(string("</a>"))
   
 
 pri httpUnauthorized
@@ -475,6 +467,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@CR_LF)
         websocket.str(string("REBOOTING",13,10))
         websocket.close
+        delay_ms(100)
         outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
         reboot
       elseif strcomp(@httpPath,string("/irtest"))
@@ -491,6 +484,7 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
         websocket.str(@CR_LF)
         websocket.str(string("BOOTING STAGE 2",13,10))
         websocket.close
+        delay_ms(100)
         boot_stage2
       elseif strcomp(@httpPath,string("/login"))
         ifnot authorized
@@ -633,22 +627,25 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
             websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
             websocket.str(@CR_LF)
+            repeat i from 0 to md5#HASH_LENGTH-1
+              websocket.hex(hash[i],2)
+            websocket.tx(" ")
+            websocket.str(@OK)
+            websocket.close
+            delay_ms(100)
             if stage_two
-              websocket.str(@OK)
-              websocket.close
-              delay_ms(100)
               outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
               reboot
             else
-              websocket.str(@OK)
-              websocket.close
-              delay_ms(100)
               boot_stage2
           else
             websocket.str(@HTTP_303)
             websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
             websocket.str(@CR_LF)
+            repeat i from 0 to md5#HASH_LENGTH-1
+              websocket.hex(hash[i],2)
+            websocket.tx(" ")
             websocket.str(@OK)
       else
         httpNotFound
@@ -713,6 +710,15 @@ PRI configPList | key,ptr,printable
   while (key:=settings.nextKey(key))
   websocket.str(string("}",10))
 
+pri httpOutputLink(url,class,content)
+  websocket.str(string("<a href='"))
+  websocket.strxml(url)
+  if class
+    websocket.str(string("' class='"))
+    websocket.strxml(class)
+  websocket.str(string("'><span>"))
+  websocket.str(content)
+  websocket.str(string("</span></a>"))
 
 
 pub beginInfo
@@ -733,7 +739,7 @@ pub addTextField(id,label,value,length)
   websocket.str(id)
   websocket.str(string("'>"))
   websocket.str(label)
-  websocket.str(string(":</label><input name='"))
+  websocket.str(string(":</label><br /><input name='"))
   websocket.str(id)
   websocket.str(string("' id='"))
   websocket.str(id)
@@ -747,7 +753,7 @@ pub addPasswordField(id,label,value,length)
   websocket.str(id)
   websocket.str(string("'>"))
   websocket.str(label)
-  websocket.str(string(":</label><input type='password' name='"))
+  websocket.str(string(":</label><br /><input type='password' name='"))
   websocket.str(id)
   websocket.str(string("' id='"))
   websocket.str(id)
@@ -761,9 +767,9 @@ pub addSubmitButton
   websocket.str(string("<input type='submit' />"))
   
 pub indexPage(authorized) | i
-  websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+  websocket.str(string("<html><head><meta name='viewport' content='width=320' />"))
+  websocket.str(string("<title>ybox2 bootloader</title>"))
   websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
-  websocket.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
  
   websocket.str(string("</head><body><h1>"))
   websocket.str(@productName)
@@ -870,7 +876,9 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
 
   if contentLength > $8000-settings#SettingsSize
     contentLength:=$8000-settings#SettingsSize
-   
+
+  md5.hashStart(@hash)
+
   repeat
     if (in := websocket.rxcheck) => 0
       isFading~
@@ -879,6 +887,10 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
       if i == 128
         ' flush to EEPROM                              
         subsys.StatusSolid(0,0,255)
+
+        repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
+          md5.hashBlock(@buffer+i,@hash)
+
         if stage_two
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
@@ -903,6 +915,8 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
         subsys.FadeToColor(255,0,0,500)
         isFading~~
       if websocket.isEOF OR (total+i) => contentLength
+        md5.hashFinish(@buffer,i,total+i,@hash)
+
         if stage_two
           ' Do we have the correct number of bytes?
           if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))

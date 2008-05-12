@@ -2,7 +2,7 @@
   Ethernet TCP/IP Socket Driver
   ----------------------------- 
   Original code (c) 2007,2008 Harrison Pham.
-  Modifications (c) 2008 Robert Quattlebaum
+  Modifications (c) 2008 Robert Quattlebaum.
 }}
 
 OBJ
@@ -1194,7 +1194,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
             ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
             ' Had to comment out this return so DHCP would work properly
             ' with internet sharing on the macosx. Not sure what is wrong.
-            return
+            'return
           elseif byte[ptr+2]==DHCP_TYPE_NAK
             ' Nak'd!
             ip_dhcp_xid++
