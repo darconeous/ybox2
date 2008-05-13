@@ -22,7 +22,7 @@ OBJ
   settings      : "settings"
                                      
 VAR
-  long weatherstack[150] 
+  long weatherstack[250] 
   byte path_holder[128]
   byte tv_mode
 
@@ -150,11 +150,17 @@ PUB init | i
 
   main
 PRI initial_configuration
-  
+
+{  
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/?id=124932&pass=sunplant"))
+}
+  settings.setString(settings#SERVER_HOST,string("www.deepdarc.com"))  
+  settings.setData(settings#SERVER_IPv4_ADDR,string(69,73,181,158),4)
+  settings.setWord(settings#SERVER_IPv4_PORT,80)
+  settings.setString(settings#SERVER_PATH,string("/weather.php?zip=95008"))
 
   return TRUE
   
@@ -163,10 +169,10 @@ PUB main | ircode
 
   cognew(WeatherUpdate, @weatherstack) 
 
-  repeat
-    \httpServer
-    subsys.StatusFatalError
-    SadChirp
+  'repeat
+    '\httpServer
+    'subsys.StatusFatalError
+    'SadChirp
     
 {{
   return
@@ -230,17 +236,18 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
     if port > 30000
       port := 20000
 
+    if settings.getString(settings#SERVER_PATH,@path_holder,64)=<0
+      subsys.StatusErrorCode(5)
+      next
+
     addr := settings.getLong(settings#SERVER_IPv4_ADDR)
-    if tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
+    if \tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
       next
     
     term.str(string($1,$A,39,$C,1," ",$C,$8,$1,$B))
     term.out(0)
-  
-    tel.resetBuffers
-    
-    settings.getString(settings#SERVER_PATH,@path_holder,64)
-    tel.waitConnectTimeout(2000)
+
+    \tel.waitConnectTimeout(2000)
      
     if NOT tel.isEOF
       stat_refreshes++
@@ -248,22 +255,22 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
       term.str(string($1,$B,12,"                                       "))
       term.str(string($1,$A,39,$C,$8," ",$1))
       
-      tel.str(string("GET "))
-      tel.str(@path_holder)
-      tel.str(string(" HTTP/1.0",13,10))       ' use HTTP/1.0, since we don't support chunked encoding
+      \tel.str(string("GET "))
+      \tel.str(@path_holder)
+      \tel.str(string(" HTTP/1.0",13,10))       ' use HTTP/1.0, since we don't support chunked encoding
       
       if settings.getString(settings#SERVER_HOST,@path_holder,64)
-        tel.str(string("Host: "))
-        tel.str(@path_holder)
-        tel.str(string(13,10))
+        \tel.str(string("Host: "))
+        \tel.str(@path_holder)
+        \tel.str(string(13,10))
 
-      tel.str(string("User-Agent: PropTCP",13,10))
-      tel.str(string("Connection: close",13,10,13,10)) 
+      \tel.str(string("User-Agent: PropTCP",13,10))
+      \tel.str(string("Connection: close",13,10,13,10)) 
 
       lineLength:=0
-      repeat while ((in:=tel.rxtime(2000)) <> -1) AND (NOT tel.isEOF)
+      repeat while ((in:=\tel.rxtime(2000)) <> -1) AND (NOT tel.isEOF)
         if (in == 13)
-          in:=tel.rxtime(2000)
+          in:=\tel.rxtime(2000)
         if (in == 10)
           ifnot lineLength
             quit
@@ -273,7 +280,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
           
       timeout := cnt
       repeat
-        if (in := tel.rxcheck) > 0
+        if (in := \tel.rxcheck) > 0
           if in <> 10
             term.out(in)
         else
@@ -473,7 +480,6 @@ pub httpServer | char, i, lineLength,contentSize,authorized
       delay_ms(1000)
       http.closeall
       next
-    http.resetBuffers
     contentSize:=0
     repeat 100
       if http.isConnected
