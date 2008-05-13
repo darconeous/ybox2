@@ -27,9 +27,10 @@ VAR
   long stack[10] 
   byte hash[md5#HASH_LENGTH]
 DAT
-productName   BYTE      "ybox2 bootloader v1.0",0      
+productName   BYTE      "ybox2 bootloader v"
+productVersion BYTE     "1.0",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
-productURL2    BYTE      "http://www.ladyada.net/make/ybox2/",0
+productURL2    BYTE     "http://ladyada.net/make/ybox2/",0
 
 PUB init | i, tv_mode
   dira[0]~~ ' Set direction on reset pin
@@ -657,7 +658,10 @@ pub httpServer | char, i,j, lineLength,contentLength,authorized
     
     websocket.close
 pub infoPage | i
-
+  websocket.str(string("ybox.version = '"))
+  websocket.str(@productVersion)
+  websocket.str(string("';",10))
+  
   if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
     websocket.str(string("ybox.macaddr = '"))
     repeat i from 0 to 5
@@ -686,10 +690,10 @@ pub infoPage | i
     
   websocket.str(string("ybox.uptime = "))
   websocket.dec(subsys.RTC)
-  websocket.str(string("';",10))
+  websocket.str(string(";",10))
   websocket.str(string("ybox.ina = "))
   websocket.dec(ina)
-  websocket.str(string("';",10))
+  websocket.str(string(";",10))
 
 PRI configPList | key,ptr,printable
 '' Outputs all of the current settings as a property list
@@ -888,9 +892,6 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
         ' flush to EEPROM                              
         subsys.StatusSolid(0,0,255)
 
-        repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
-          md5.hashBlock(@buffer+i,@hash)
-
         if stage_two
           'Verify that the bytes we got match the EEPROM
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
@@ -899,9 +900,18 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
             if buffer[i] <> buffer2[i]
               term.str(string(13,"Verify failed.",13))
               abort -2
+
+          repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
+            md5.hashBlock(@buffer+i,@hash)
         else
           if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
             abort -3
+
+          ' Calculate our hash while we wait
+          repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
+            md5.hashBlock(@buffer+i,@hash)
+            
+          ' Wait for the write to be finished
           repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
         total+=i
         i~

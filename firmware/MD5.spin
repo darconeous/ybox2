@@ -1,8 +1,7 @@
 {{
   MD5 Hash in Spin
-  Robert Quattlebaum <darco@deepdarc.com>
-
-  See http://en.wikipedia.org/wiki/MD5 for more information on the MD5 hash algorithm.
+  Written by Robert Quattlebaum <darco@deepdarc.com>
+  Adapted from pseudo code from http://en.wikipedia.org/wiki/MD5.
 }}
 CON { Public Constants }
   HASH_LENGTH = 16 ' An MD5 hash is 16 bytes long
@@ -61,7 +60,7 @@ PUB hashBlock(dataptr,h)|i,a,b,c,d,f,g,tmp
   LONG[h][2]+=c
   LONG[h][3]+=d
          
-PUB hashFinish(dataptr,datalen,totallen,h):i|a[BLOCK_LENGTH/4]
+PUB hashFinish(dataptr,datalen,totallen,h)|a[BLOCK_LENGTH/4]
   repeat while datalen => BLOCK_LENGTH
     hashBlock(dataptr,h)
     datalen-=BLOCK_LENGTH
@@ -74,4 +73,22 @@ PUB hashFinish(dataptr,datalen,totallen,h):i|a[BLOCK_LENGTH/4]
     bytefill(@a,0,BLOCK_LENGTH)
   LONG[@a][14]:=totallen*8
   hashBlock(@a,h)     
-  
+  bytefill(@a,0,BLOCK_LENGTH)
+CON
+{{
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                   TERMS OF USE: MIT License                                                  │                                                            
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation    │ 
+│files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,    │
+│modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software│
+│is furnished to do so, subject to the following conditions:                                                                   │
+│                                                                                                                              │
+│The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.│
+│                                                                                                                              │
+│THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE          │
+│WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR         │
+│COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,   │
+│ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+}}
