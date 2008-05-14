@@ -366,9 +366,9 @@ pri httpNotFound
   websocket.str(@HTTP_404)
 
      
-pub httpServer | char, i,j, lineLength,contentLength,authorized
+pub httpServer | i,j,contentLength,authorized
   repeat
-    repeat while \websocket.listen(80) == -1
+    repeat while \websocket.listen(80) < 0
       buttonCheck
       delay_ms(1000)
       websocket.closeall

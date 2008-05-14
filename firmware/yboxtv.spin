@@ -22,7 +22,6 @@ OBJ
   settings      : "settings"
                                      
 VAR
-  long weatherstack[250] 
   byte path_holder[128]
   byte tv_mode
 
@@ -33,6 +32,7 @@ VAR
 DAT
 productName   BYTE      "ybox2 info widget",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
+weatherstack  LONG      0[200]
   
 PUB init | i
   dira[0]:=1 ' Set direction on reset pin
@@ -88,7 +88,7 @@ PUB init | i
       reboot
   
   outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
-  if not \tel.start(1,2,3,4,6,7,-1,-1)
+  if not \websocket.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     SadChirp
@@ -151,28 +151,30 @@ PUB init | i
   main
 PRI initial_configuration
 
-{  
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/?id=124932&pass=sunplant"))
-}
+{
   settings.setString(settings#SERVER_HOST,string("www.deepdarc.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(69,73,181,158),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/weather.php?zip=95008"))
-
+}
   return TRUE
   
-PUB main | ircode
-  delay_ms(2000) ' Wait a second to let the ethernet stabalize
+PUB main
+  delay_ms(1000) ' Wait a second to let the ethernet stabalize
 
   cognew(WeatherUpdate, @weatherstack) 
+  repeat
+  'delay_ms(2000) ' Wait a second to let the ethernet stabalize
+  
+  \httpServer
 
-  'repeat
-    '\httpServer
-    'subsys.StatusFatalError
-    'SadChirp
+  subsys.StatusFatalError
+  SadChirp
+  reboot
     
 {{
   return
@@ -227,7 +229,6 @@ PUB main | ircode
     if ircode == $02
       subsys.StatusFatalError
 }}    
-
 pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
   port := 20000
   retrydelay := 500
@@ -260,23 +261,13 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
       \tel.str(string(" HTTP/1.0",13,10))       ' use HTTP/1.0, since we don't support chunked encoding
       
       if settings.getString(settings#SERVER_HOST,@path_holder,64)
-        \tel.str(string("Host: "))
-        \tel.str(@path_holder)
-        \tel.str(string(13,10))
+        \tel.txmimeheader(string("Host"),@path_holder)
 
-      \tel.str(string("User-Agent: PropTCP",13,10))
-      \tel.str(string("Connection: close",13,10,13,10)) 
+      \tel.txmimeheader(string("User-Agent"),string("PropTCP"))
+      \tel.txmimeheader(string("Connection"),string("close"))
+      \tel.str(@CR_LF)
 
-      lineLength:=0
-      repeat while ((in:=\tel.rxtime(2000)) <> -1) AND (NOT tel.isEOF)
-        if (in == 13)
-          in:=\tel.rxtime(2000)
-        if (in == 10)
-          ifnot lineLength
-            quit
-          lineLength:=0
-        else
-          lineLength++
+      repeat while \http.getNextHeader(tel.handle,0,0,0,0)>0
           
       timeout := cnt
       repeat
@@ -312,32 +303,23 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
       if retrydelay < 10_000
          retrydelay+=retrydelay
       delay_ms(retrydelay)             ' failed to connects     
-
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
   term.str(string($C,$8))    
 
-pub HappyChirp | i, j
-  repeat j from 0 to 2
-    repeat i from 0 to 30
-      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-      delay_ms(1)
-    outa[subsys#SPKRPin]:=0
-    delay_ms(50)
+pub HappyChirp
+  subsys.chirpHappy
 pub SadChirp | i
-
-  repeat i from 0 to 15
-    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-    delay_ms(17)
-  outa[subsys#SPKRPin]:=0
+  subsys.chirpSad
     
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
 OBJ
-  http          : "api_telnet_serial"
+  websocket     : "api_telnet_serial"
   base64        : "base64"
+  http          : "http"
 VAR
   byte httpMethod[8]
   byte httpPath[64]
@@ -365,92 +347,19 @@ HTTP_CONTENT_TYPE_HTML  BYTE "text/html; charset=utf-8",0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
 
-pri httpParseRequest(method,path,query) | i,char
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<7
-      BYTE[method][i]:=char
-      if char == " "
-        quit
-      i++
-    BYTE[method][i]:=0
-    i:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<63
-      BYTE[path][i]:=char
-      if char == " " OR char == "?"  OR char == "#"
-        quit
-      i++
-
-    if BYTE[path][i]=="?"
-      ' If we stopped on a question mark, then grab the query
-      BYTE[path][i]:=0
-      i:=0
-      repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF) AND i<126
-        BYTE[query][i]:=char
-        if char == " " OR char == "#" OR char == 13
-          quit
-        i++        
-      BYTE[query][i]:=0
-    else
-      BYTE[path][i]:=0
-      BYTE[query][0]:=0
 
 pri httpUnauthorized
-  http.str(@HTTP_401)
-  http.str(@HTTP_CONNECTION_CLOSE)
-  http.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
-  http.str(@CR_LF)
-  http.str(@HTTP_401)
+  websocket.str(@HTTP_401)
+  websocket.str(@HTTP_CONNECTION_CLOSE)
+  websocket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  websocket.str(@CR_LF)
+  websocket.str(@HTTP_401)
 
 pri httpNotFound
-  http.str(@HTTP_404)
-  http.str(@HTTP_CONNECTION_CLOSE)
-  http.str(@CR_LF)
-  http.str(@HTTP_404)
-
-pri httpGetField(packeddataptr,keystring,outvalue,outsize) | i,char
-  i:=0
-  repeat while BYTE[packeddataptr]
-    if BYTE[packeddataptr]=="=" 'AND strsize(keystring)==i
-      packeddataptr++
-      i:=0
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
-         BYTE[outvalue][i++]:=byte[packeddataptr++]
-      BYTE[outvalue][i]:=0
-      httpURLUnescapeInplace(outvalue)
-      return i
-    if BYTE[packeddataptr] <> BYTE[keystring][i]
-      ' skip to &
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&"
-        packeddataptr++
-      ifnot byte[packeddataptr] 
-        quit
-      packeddataptr++
-      i:=0
-    else
-      packeddataptr++
-      i++  
-  return 0
-pri httpURLUnescapeInplace(in_ptr) | out_ptr,char,val
-  out_ptr:=in_ptr
-  repeat while (char:=byte[in_ptr++])
-    if char=="%"
-      case (char:=byte[in_ptr++])
-        "a".."f": val:=char-"a"+10
-        "A".."F": val:=char-"A"+10
-        "0".."9": val:=char-"0"
-        0: quit
-        other: next
-      val:=val<<4
-      case (char:=byte[in_ptr++])
-        "a".."f": val|=char-"a"+10
-        "A".."F": val|=char-"A"+10
-        "0".."9": val|=char-"0"
-        0: quit
-        other: next
-      char:=val
-    byte[out_ptr++]:=char
-  byte[out_ptr++]:=0
-  return TRUE
+  websocket.str(@HTTP_404)
+  websocket.str(@HTTP_CONNECTION_CLOSE)
+  websocket.str(@CR_LF)
+  websocket.str(@HTTP_404)
 
 pri parseIPStr(instr,outaddr) | char, i,j
   repeat j from 0 to 3
@@ -469,156 +378,150 @@ pri parseIPStr(instr,outaddr) | char, i,j
     return TRUE
   abort FALSE 
       
+PUB atoi(inptr):retVal | i,char
+  retVal~
+  
+  ' Skip leading whitespace
+  repeat while BYTE[inptr] AND BYTE[inptr]==" "
+    inptr++
+   
+  repeat 10
+    case (char := BYTE[inptr++])
+      "0".."9":
+        retVal:=retVal*10+char-"0"
+      OTHER:
+        quit
          
 
-pub httpServer | char, i, lineLength,contentSize,authorized
-
+pub httpServer | i, contentSize,authorized
   repeat
-    repeat while \http.listen(80) == -1
+    repeat while \websocket.listen(80) < 0
       if ina[subsys#BTTNPin]
         reboot
       delay_ms(1000)
-      http.closeall
+      websocket.closeall
       next
-    contentSize:=0
-    repeat 100
-      if http.isConnected
-        quit
-      http.waitConnectTimeout(100)
+
+    repeat while NOT websocket.isConnected
+      'websocket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
 
-    ifnot http.isConnected
+    abort
+    
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
+      websocket.close
       next
-
-    httpParseRequest(@httpMethod,@httpPath,@httpQuery)
-
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
-    
-    lineLength:=0
-    repeat while ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
-      if (char == 13)
-        char:=http.rxtime(1000)
-      if (char == 10)
-        ifnot lineLength
-          quit
-        lineLength:=0
-      else
-        if lineLength<31
-          httpHeader[lineLength++]:=char
-          if char == ":"
-            httpHeader[lineLength-1]:=0
-            if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
-              contentSize := http.readDec
-            elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-              http.rxtime(1000)
-              repeat i from 0 to 7 ' Skip the 'Basic' part
-                if http.rxtime(1000) == " " OR http.isEOF
-                  quit
-              i:=0
-              repeat while i<127 AND ((char:=http.rxtime(1000)) <> -1) AND (NOT http.isEOF)
-                buffer[i++]:=char
-                if (char == 13)
-                  quit
-              if i
-                buffer[i]:=0
-                base64.inplaceDecode(@buffer)  
-                settings.getString(settings#MISC_PASSWORD,@buffer2,127)
-                authorized:=strcomp(@buffer,@buffer2)
-            httpHeader[0]:=0
+
+    contentSize:=0
+        
+    repeat while \http.getNextHeader(websocket.handle,@httpHeader,32,@buffer,128)>0
+      if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
+        contentSize:=atoi(@buffer)
+      elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
+        ' Skip past the word "Basic"
+        repeat i from 0 to 7
+          if buffer[i]==" "
+            i++
+            quit
+          if buffer[i]==0
+            quit
+        base64.inplaceDecode(@buffer+i)  
+        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
+        authorized:=strcomp(@buffer+i,@buffer2)
 
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
-        http.str(@HTTP_200)
-        http.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
+        websocket.str(@HTTP_200)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
 
-        http.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
-        http.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
-        http.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
+        websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+        websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
  
-        http.str(string("</head><body><h1>"))
-        http.str(@productName)
-        http.str(string("</h1>"))
+        websocket.str(string("</head><body><h1>"))
+        websocket.str(@productName)
+        websocket.str(string("</h1>"))
 
         if settings.getData(settings#NET_MAC_ADDR,@httpMethod,6)
-          http.str(string("<div><tt>MAC: "))
+          websocket.str(string("<div><tt>MAC: "))
           repeat i from 0 to 5
             if i
-              http.tx("-")
-            http.hex(byte[@httpMethod][i],2)
-          http.str(string("</tt></div>"))
+              websocket.tx("-")
+            websocket.hex(byte[@httpMethod][i],2)
+          websocket.str(string("</tt></div>"))
 
-        http.str(string("<div><tt>Uptime: "))
-        http.dec(subsys.RTC/60)
-        http.tx("m")
-        http.dec(subsys.RTC//60)
-        http.tx("s")
-        http.str(string("</tt></div>"))
-        http.str(string("<div><tt>Refreshes: "))
-        http.dec(stat_refreshes)
-        http.str(string("</tt></div>"))
-        http.str(string("<div><tt>Errors: "))
-        http.dec(stat_errors)
-        http.str(string("</tt></div>"))
-        http.str(string("<div><tt>INA: "))
+        websocket.str(string("<div><tt>Uptime: "))
+        websocket.dec(subsys.RTC/60)
+        websocket.tx("m")
+        websocket.dec(subsys.RTC//60)
+        websocket.tx("s")
+        websocket.str(string("</tt></div>"))
+        websocket.str(string("<div><tt>Refreshes: "))
+        websocket.dec(stat_refreshes)
+        websocket.str(string("</tt></div>"))
+        websocket.str(string("<div><tt>Errors: "))
+        websocket.dec(stat_errors)
+        websocket.str(string("</tt></div>"))
+        websocket.str(string("<div><tt>INA: "))
         repeat i from 0 to 7
-          http.dec(ina[i])
-        http.tx(" ")
+          websocket.dec(ina[i])
+        websocket.tx(" ")
         repeat i from 8 to 15
-          http.dec(ina[i])
-        http.tx(" ")
+          websocket.dec(ina[i])
+        websocket.tx(" ")
         repeat i from 16 to 23
-          http.dec(ina[i])
-        http.tx(" ")
+          websocket.dec(ina[i])
+        websocket.tx(" ")
         repeat i from 23 to 31
-          http.dec(ina[i])          
-        http.str(string("</tt></div>"))
+          websocket.dec(ina[i])          
+        websocket.str(string("</tt></div>"))
 
-        http.str(string("<h2>Settings</h2>"))
-        http.str(string("<form action='\config' method='PUT'>"))
-        http.str(string("<label for='SH'>Server Host</label><input name='SH' id='SH' size='32' value='"))
+        websocket.str(string("<h2>Settings</h2>"))
+        websocket.str(string("<form action='\config' method='PUT'>"))
+        websocket.str(string("<label for='SH'>Server Host</label><input name='SH' id='SH' size='32' value='"))
         settings.getString(settings#SERVER_HOST,@httpQuery,32)
-        http.strxml(@httpQuery)
-        http.str(string("' /><br />"))
-        http.str(string("<label for='SP'>Server Path</label><input name='SP' id='SP' size='32' value='"))
+        websocket.strxml(@httpQuery)
+        websocket.str(string("' /><br />"))
+        websocket.str(string("<label for='SP'>Server Path</label><input name='SP' id='SP' size='32' value='"))
         settings.getString(settings#SERVER_PATH,@httpQuery,32)
-        http.strxml(@httpQuery)
-        http.str(string("' /><br />"))
+        websocket.strxml(@httpQuery)
+        websocket.str(string("' /><br />"))
 
-        http.str(string("<label for='SA'>Server Address</label><input name='SA' id='SA' size='32' value='"))
+        websocket.str(string("<label for='SA'>Server Address</label><input name='SA' id='SA' size='32' value='"))
         settings.getData(settings#SERVER_IPv4_ADDR,@httpQuery,32)
-        http.txip(@httpQuery)
-        http.str(string("' /><br />"))
+        websocket.txip(@httpQuery)
+        websocket.str(string("' /><br />"))
 
-        http.str(string("<input name='submit' type='submit' />"))
-        http.str(string("</form>"))
+        websocket.str(string("<input name='submit' type='submit' />"))
+        websocket.str(string("</form>"))
         
         
-        http.str(string("<h2>Actions</h2>"))
-        http.str(string("<div><a href='/reboot'>Reboot</a></div>"))
-        http.str(string("<h2>Other</h2>"))
-        http.str(string("<div><a href='"))
-        http.str(@productURL)
-        http.str(string("'>More info</a></div>"))
+        websocket.str(string("<h2>Actions</h2>"))
+        websocket.str(string("<div><a href='/reboot'>Reboot</a></div>"))
+        websocket.str(string("<h2>Other</h2>"))
+        websocket.str(string("<div><a href='"))
+        websocket.str(@productURL)
+        websocket.str(string("'>More info</a></div>"))
 
-        http.str(string("</body></html>",13,10))
+        websocket.str(string("</body></html>",13,10))
         
       elseif strcomp(@httpPath,string("/config"))
         ifnot authorized
           httpUnauthorized
           next
 
-        if httpGetField(@httpQuery,string("SH"),@buffer,127)
+        if http.getFieldFromQuery(@httpQuery,string("SH"),@buffer,127)
           settings.setString(settings#SERVER_HOST,@buffer)  
-        if httpGetField(@httpQuery,string("SP"),@buffer,127)
+        if http.getFieldFromQuery(@httpQuery,string("SP"),@buffer,127)
           settings.setString(settings#SERVER_PATH,@buffer)  
 
-        if httpGetField(@httpQuery,string("SA"),@buffer,127)
+        if http.getFieldFromQuery(@httpQuery,string("SA"),@buffer,127)
           parseIPStr(@buffer,@buffer2)
           settings.setData(settings#SERVER_IPv4_ADDR,@buffer2,4)  
         
@@ -626,29 +529,29 @@ pub httpServer | char, i, lineLength,contentSize,authorized
         settings.removeKey(settings#MISC_STAGE_TWO)
         settings.commit
         
-        http.str(@HTTP_303)
-        http.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("OK",13,10))
+        websocket.str(@HTTP_303)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("OK",13,10))
 
       elseif strcomp(@httpPath,string("/reboot"))
         ifnot authorized
           httpUnauthorized
           next
-        http.str(@HTTP_200)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(string("REBOOTING",13,10))
-        http.close
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("REBOOTING",13,10))
+        websocket.close
         reboot
       else           
         httpNotFound
     else
-        http.str(@HTTP_501)
-        http.str(@HTTP_CONNECTION_CLOSE)
-        http.str(@CR_LF)
-        http.str(@HTTP_501)
+        websocket.str(@HTTP_501)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(@HTTP_501)
     
-    http.close
+    websocket.close
  

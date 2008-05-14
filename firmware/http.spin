@@ -64,27 +64,31 @@ pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen): count|char
       ":":
         tcp.readByteTimeout(handle,TIMEOUT)
         count++
-        byte[namePtr]:=0
+        if namePtr
+          byte[namePtr]:=0
         quit
       other:
         count++
-        if nameLen
+        if nameLen and namePtr
           nameLen--
           byte[namePtr++]:=char
   repeat while not tcp.isEOF(handle)
     char:=tcp.readByteTimeout(handle,TIMEOUT)
     case char
       13,10,-1:
-        byte[valuePtr]:=0
+        if valuePtr
+          byte[valuePtr]:=0
         tcp.readByteTimeout(handle,TIMEOUT)
         return count
       other:
         count++
-        if valueLen
+        if valueLen and valuePtr
           valueLen--
           byte[valuePtr++]:=char
-  byte[namePtr]:=0
-  byte[valuePtr]:=0
+  if namePtr
+    byte[namePtr]:=0
+  if valuePtr
+    byte[valuePtr]:=0
 pub parseRequest(handle,method,path,query) | i,char
     i:=0
     repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<7
