@@ -170,7 +170,7 @@ PRI initial_configuration
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
-  settings.setString(settings#SERVER_PATH,string("/?id=124932&pass=sunplant"))
+  settings.setString(settings#SERVER_PATH,string("/?zipcode=95008"))
 {
   settings.setString(settings#SERVER_HOST,string("www.deepdarc.com"))  
   settings.setData(settings#SERVER_IPv4_ADDR,string(69,73,181,158),4)
@@ -256,6 +256,7 @@ pub WeatherCog | retrydelay,port,err
       subsys.StatusIdle
       term.str(string($B,12))    
       term.dec(subsys.RTC) ' Print out the RTC value
+      term.out(" ")
       tel.close
       delay_ms(30000)     ' 30 sec delay
     else
@@ -270,7 +271,7 @@ pub WeatherCog | retrydelay,port,err
       port := 20000
        
 
-pub WeatherUpdate(port) | timeout, addr, gotstart,in
+pub WeatherUpdate(port) | timeout, addr, gotstart,in,i
   if settings.getString(settings#SERVER_PATH,@path_holder,64)=<0
     abort 5
    
@@ -303,18 +304,20 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in
     repeat while http.getNextHeader(tel.handle,0,0,0,0)>0
         
     timeout := cnt
+    i:=0
     repeat
       if (in := tel.rxcheck) > 0
         if in <> 10
           term.out(in)
+          i++
       else
         ifnot tel.isConnected
-          return 0
+          return NOT i
         if cnt-timeout>10*clkfreq ' 10 second timeout      
           abort(subsys#ERR_DISCONNECTED)
   else
     abort(subsys#ERR_NO_CONNECT)
-  return 0
+  return 666
      
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
