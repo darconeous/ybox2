@@ -8,7 +8,7 @@ VAR
   byte listening
 
 PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
-
+  _handle:=-1
   return tcp.start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
 
 PUB stop
@@ -52,9 +52,11 @@ PUB close
 
   if _handle=>0
     tcp.close(_handle)
+    _handle:=-1
 PUB closeAll
 
   tcp.closeAll
+  _handle:=-1
 
 PUB rxflush
 

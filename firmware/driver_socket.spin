@@ -659,14 +659,14 @@ PUB listen(port) | handle, handle_addr, x
 
   LONG[handle_addr + sAge] := long[RTCADDR]
 
-  if (x:=\q.new)<0
+  if (x:=\q.new)=<0
     socketunlock
     return -1
   else
     BYTE[handle_addr + sSockQTx] := x
     
-  if (x:=\q.new)<0
-    q.delete(BYTE[handle_addr + sSockQTx]~)
+  if (x:=\q.new)=<0
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
     socketunlock
     return -1
   else
@@ -700,14 +700,14 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   ' Start with a clean slate
   bytefill(handle_addr,0,sSocketBytes)
   
-  if (x:=\q.new)<0
+  if (x:=\q.new)=<0
     socketunlock
     return -1
   else
     BYTE[handle_addr + sSockQTx] := x
     
-  if (x:=\q.new)<0
-    q.delete(BYTE[handle_addr + sSockQTx]~)
+  if (x:=\q.new)=<0
+    \q.delete(BYTE[handle_addr + sSockQTx]~)
     socketunlock
     return -1
   else
@@ -766,7 +766,7 @@ PUB isValidHandle(handle) | handle_addr
 '' In other words, a closed listening socket is now invalid, etc
 
   if handle => 2 OR handle < 0
-    abort handle
+    abort -111
 
   handle_addr := @sSockets + (sSocketBytes * handle)
 

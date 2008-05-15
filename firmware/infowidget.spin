@@ -150,7 +150,7 @@ PUB init | i
     term.str(string("'",13))
    
 
-  cognew(WeatherUpdate, @weatherstack) 
+  cognew(WeatherCog, @weatherstack) 
 
   repeat
     HappyChirp
@@ -161,7 +161,7 @@ PUB init | i
      
     subsys.StatusFatalError
     SadChirp
-    delay_ms(40000)
+    delay_ms(500)
     websocket.closeAll
   reboot
 
@@ -246,81 +246,76 @@ PUB main
       subsys.StatusFatalError
 }}    
 
-pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
+pub WeatherCog | retrydelay,port,err
   port := 20000
-  retrydelay := 500
+
   repeat
     subsys.StatusLoading
-  
-    if port > 30000
-      port := 20000
-
-    if settings.getString(settings#SERVER_PATH,@path_holder,64)=<0
-      subsys.StatusErrorCode(5)
-      next
-
-    addr := settings.getLong(settings#SERVER_IPv4_ADDR)
-    if \tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
-      next
-    
-    term.str(string($1,$A,39,$C,1," ",$C,$8,$1,$B))
-    term.out(0)
-
-    \tel.waitConnectTimeout(2000)
-     
-    if NOT tel.isEOF
-      stat_refreshes++
-
-      term.str(string($1,$B,12,"                                       "))
-      term.str(string($1,$A,39,$C,$8," ",$1))
-      
-      \tel.str(string("GET "))
-      \tel.str(@path_holder)
-      \tel.str(string(" HTTP/1.0",13,10))       ' use HTTP/1.0, since we don't support chunked encoding
-      
-      if settings.getString(settings#SERVER_HOST,@path_holder,64)
-        \tel.txmimeheader(string("Host"),@path_holder)
-
-      \tel.txmimeheader(string("User-Agent"),string("PropTCP"))
-      \tel.txmimeheader(string("Connection"),string("close"))
-      \tel.str(@CR_LF)
-
-      repeat while \http.getNextHeader(tel.handle,0,0,0,0)>0
-          
-      timeout := cnt
-      repeat
-        if (in := \tel.rxcheck) > 0
-          if in <> 10
-            term.out(in)
-        else
-          ifnot tel.isConnected
-            ' Success!
-            retrydelay := 500 ' Reset the retry delay
-            subsys.StatusIdle
-            term.str(string($B,12))    
-            term.dec(subsys.RTC) ' Print out the RTC value
-            delay_ms(30000)     ' 30 sec delay
-            quit
-          if cnt-timeout>10*clkfreq ' 10 second timeout      
-            subsys.StatusErrorCode(subsys#ERR_DISCONNECTED)
-            stat_errors++
-            showMessage(string("Error: Connection Lost!"))    
-            tel.close
-            ++port ' Change the source port, just in case
-            if retrydelay < 10_000
-               retrydelay+=retrydelay
-            delay_ms(retrydelay)             ' failed to connect     
-            quit
-    else
-      subsys.StatusErrorCode(subsys#ERR_NO_CONNECT)
-      stat_errors++
-      showMessage(string("Error: Failed to Connect!"))    
+    if (err:=\WeatherUpdate(port))
+      retrydelay := 500 ' Reset the retry delay
+      subsys.StatusIdle
+      term.str(string($B,12))    
+      term.dec(subsys.RTC) ' Print out the RTC value
       tel.close
-      ++port ' Change the source port, just in case
+      delay_ms(30000)     ' 30 sec delay
+    else
+      subsys.StatusErrorCode(err)
+      stat_errors++
+      showMessage(string("Error!"))    
+      tel.close
       if retrydelay < 10_000
          retrydelay+=retrydelay
-      delay_ms(retrydelay)             ' failed to connects     
+      delay_ms(retrydelay)             ' failed to connect     
+    if ++port > 30000
+      port := 20000
+       
 
+pub WeatherUpdate(port) | timeout, addr, gotstart,in
+  if settings.getString(settings#SERVER_PATH,@path_holder,64)=<0
+    abort 5
+   
+  addr := settings.getLong(settings#SERVER_IPv4_ADDR)
+  if tel.connect(@addr,settings.getWord(settings#SERVER_IPv4_PORT),port) == -1
+    abort 6
+   
+  term.str(string($1,$A,39,$C,1," ",$C,$8,$1,$B))
+  term.out(0)
+   
+  tel.waitConnectTimeout(2000)
+   
+  ifnot tel.isEOF
+    stat_refreshes++
+   
+    term.str(string($1,$B,12,"                                       "))
+    term.str(string($1,$A,39,$C,$8," ",$1))
+    
+    tel.str(string("GET "))
+    tel.str(@path_holder)
+    tel.str(string(" HTTP/1.0",13,10))       ' use HTTP/1.0, since we don't support chunked encoding
+    
+    if settings.getString(settings#SERVER_HOST,@path_holder,64)
+      tel.txmimeheader(string("Host"),@path_holder)
+   
+    tel.txmimeheader(string("User-Agent"),string("PropTCP"))
+    tel.txmimeheader(string("Connection"),string("close"))
+    tel.str(@CR_LF)
+   
+    repeat while http.getNextHeader(tel.handle,0,0,0,0)>0
+        
+    timeout := cnt
+    repeat
+      if (in := tel.rxcheck) > 0
+        if in <> 10
+          term.out(in)
+      else
+        ifnot tel.isConnected
+          return 0
+        if cnt-timeout>10*clkfreq ' 10 second timeout      
+          abort(subsys#ERR_DISCONNECTED)
+  else
+    abort(subsys#ERR_NO_CONNECT)
+  return 0
+     
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
@@ -406,6 +401,20 @@ PUB atoi(inptr):retVal | i,char
       OTHER:
         quit
          
+pub addTextField(id,label,value,length)
+  websocket.str(string("<div><label for='"))
+  websocket.str(id)
+  websocket.str(string("'>"))
+  websocket.str(label)
+  websocket.str(string(":</label><br /><input name='"))
+  websocket.str(id)
+  websocket.str(string("' id='"))
+  websocket.str(id)
+  websocket.str(string("' size='"))
+  websocket.dec(length)
+  websocket.str(string("' value='"))
+  websocket.strxml(value)
+  websocket.str(string("' /></div>"))
 
 pub httpServer | i, contentLength,authorized
   repeat
@@ -494,16 +503,12 @@ pub httpServer | i, contentLength,authorized
 
         websocket.str(string("<h2>Settings</h2>"))
         websocket.str(string("<form action='\config' method='PUT'>"))
-        websocket.str(string("<label for='SH'>Server Host</label><input name='SH' id='SH' size='32' value='"))
         settings.getString(settings#SERVER_HOST,@httpQuery,32)
-        websocket.strxml(@httpQuery)
-        websocket.str(string("' /><br />"))
-        websocket.str(string("<label for='SP'>Server Path</label><input name='SP' id='SP' size='32' value='"))
-        settings.getString(settings#SERVER_PATH,@httpQuery,32)
-        websocket.strxml(@httpQuery)
-        websocket.str(string("' /><br />"))
+        addTextField(string("SH"),string("Server Host"),@httpQuery,32)
+        settings.getString(settings#SERVER_Path,@httpQuery,32)
+        addTextField(string("SP"),string("Server Path"),@httpQuery,32)
 
-        websocket.str(string("<label for='SA'>Server Address</label><input name='SA' id='SA' size='32' value='"))
+        websocket.str(string("<label for='SA'>Server Address</label><br /><input name='SA' id='SA' size='32' value='"))
         settings.getData(settings#SERVER_IPv4_ADDR,@httpQuery,32)
         websocket.txip(@httpQuery)
         websocket.str(string("' /><br />"))
