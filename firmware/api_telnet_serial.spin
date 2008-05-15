@@ -89,6 +89,10 @@ PUB tx(txbyte)
 
   repeat while isConnected and (txcheck(txbyte) < 0)
 
+PUB txdata(ptr,len)
+  if isConnected
+    tcp.writeData(handle,ptr,len)
+
 PUB txxml(txbyte)
   case txbyte
     "'": str(string("&apos;"))
@@ -105,9 +109,7 @@ PUB txurl(txbyte)
       tx(txbyte)
 
 PUB str(stringptr)                
-
-  repeat strsize(stringptr)
-    tx(byte[stringptr++])    
+  txdata(stringptr,strsize(stringptr))
 
 PUB strurl(stringptr)                
 

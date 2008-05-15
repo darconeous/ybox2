@@ -69,8 +69,8 @@ PUB init | i
 
   subsys.StatusLoading
 
-  if settings.findKey(settings#MISC_STAGE_TWO)
-    settings.removeKey(settings#MISC_STAGE_TWO)
+  if settings.findKey(settings#MISC_STAGE2)
+    settings.removeKey(settings#MISC_STAGE2)
 
   'ir.init(15, 0, 300, 1)
          
@@ -406,8 +406,6 @@ pub httpServer | i, contentSize,authorized
       'websocket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
-
-    abort
     
     if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
       websocket.close
@@ -526,7 +524,7 @@ pub httpServer | i, contentSize,authorized
           settings.setData(settings#SERVER_IPv4_ADDR,@buffer2,4)  
         
         settings.removeKey($1010)
-        settings.removeKey(settings#MISC_STAGE_TWO)
+        settings.removeKey(settings#MISC_STAGE2)
         settings.commit
         
         websocket.str(@HTTP_303)

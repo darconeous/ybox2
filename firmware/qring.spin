@@ -112,6 +112,27 @@ PUB pull(i) : val | p
   else
     abort ERR_Q_EMPTY
 
+PUB pulldata(i,ptr,maxlen) : len | char
+  i--
+  if i<0 OR i=>Q_MAX
+    abort ERR_Q_INVALID
+
+  len:=((writepoint[i]-readpoint[i])&buffer_mask)
+  if maxlen<len
+    len:=maxlen
+
+  ifnot len
+    return
+      
+  if len+readpoint[i]>Q_SIZE
+    bytemove(ptr,@buffer+i*Q_SIZE+readpoint[i]+1, Q_SIZE-readpoint[i])
+    ptr+=Q_SIZE-readpoint[i]
+    bytemove(ptr,@buffer+i*Q_SIZE+1, len-(Q_SIZE-readpoint[i]))
+    readpoint[i] := (readpoint[i] + len) & buffer_mask
+  else
+    bytemove(ptr,@buffer+i*Q_SIZE+readpoint[i]+1, len)
+    readpoint[i] := (readpoint[i] + len) & buffer_mask
+
 PUB isEmpty(i)
   ifnot i
     return TRUE

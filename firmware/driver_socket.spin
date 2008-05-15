@@ -116,7 +116,7 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
     dhcp_process
     ++i
     
-    if has_valid_ip_addr AND i > 2
+    if has_valid_ip_addr AND i > 1
       ' perform send tick (occurs every 2 cycles, since incoming packets more important)
       tick_tcpsend
       i := 0
@@ -523,11 +523,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       ' If we have hit out next ack marker, send an ACK
 
       if NOT q.isEmpty(BYTE[handle_addr+sSockQTx])
-        i := 0
-        repeat
-          BYTE[pkt][TCP_data + i] := q.pull(BYTE[handle_addr+sSockQTx])
-          ++i
-        while NOT q.isEmpty(BYTE[handle_addr+sSockQTx])
+        i := q.pullData(BYTE[handle_addr+sSockQTx],pkt+TCP_data,1000)
         send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt+TCP_data,i)
       else
         i:=q.bytesFree(BYTE[handle_addr + sSockQRx])
@@ -771,6 +767,13 @@ PUB writeByteNonBlocking(handle, txbyte):retVal | ptr
   if (retVal:=\q.push(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],txbyte)) < 0 AND retVal<>q#ERR_Q_FULL
     abort retVal  
 
+PUB writeDataNonBlocking(handle, ptr,len):retVal
+'' Writes a byte to the specified socket
+'' Will not block (returns q#ERR_Q_FULL if no buffer space available)
+
+  if (retVal:=\q.pushData(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],ptr,len)) < 0 AND retVal<>q#ERR_Q_FULL
+    abort retVal  
+
 PUB writeByte(handle, txbyte):retVal
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
@@ -778,6 +781,18 @@ PUB writeByte(handle, txbyte):retVal
   repeat while (retVal:=writeByteNonBlocking(handle, txbyte)) == q#ERR_Q_FULL
     ifnot isValidHandle(handle)
       abort -1
+
+PRI writeData_(handle, ptr,len): retVal
+  repeat while (retVal:=writeDataNonBlocking(handle, ptr,len)) == q#ERR_Q_FULL
+    ifnot isValidHandle(handle)
+      abort -1
+
+PUB writeData(handle, ptr,len)
+  repeat while len > q#Q_SIZE-1
+    writeData_(handle,ptr,q#Q_SIZE-1)
+    ptr+=q#Q_SIZE-1
+    len-=q#Q_SIZE-1
+  return writeData_(handle,ptr,len)
 
 CON
 ' The following is an 'array' that represents all the socket handle data (with respect to the remote host)

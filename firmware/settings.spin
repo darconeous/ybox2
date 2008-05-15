@@ -54,7 +54,10 @@ CON { Keys for various stuff }
   MISC_LED_CONF      = "l"+("c"<<8) ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
   MISC_TV_MODE       = "t"+("v"<<8) ' 1 byte, 0=NTSC, 1=PAL
 
-  MISC_STAGE_TWO     = "2"+("2"<<8)
+  MISC_STAGE2     = "2"+("2"<<8)
+
+  MISC_STAGE2_SIZE   = "2"+("S"<<8)
+  MISC_STAGE2_HASH   = "2"+("H"<<8)
 
   NET_MAC_ADDR       = "E"+("A"<<8)
   NET_IPv4_ADDR      = "4"+("A"<<8)

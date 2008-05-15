@@ -4,7 +4,7 @@
 
         Designed for use with a 64KB EEPROM. It will not work
         properly with a 32KB EEPROM.
-
+                               
 }}
 CON
 
@@ -51,9 +51,9 @@ PUB init | i, tv_mode
 
   ' If we are in the second stage of a bootloader upgrade,
   ' then we need set the appropriate variable.
-  if settings.findKey(settings#MISC_STAGE_TWO)
+  if settings.findKey(settings#MISC_STAGE2)
     stage_two := TRUE
-    settings.removeKey(settings#MISC_STAGE_TWO)
+    settings.removeKey(settings#MISC_STAGE2)
   else
     stage_two := FALSE
 
@@ -200,7 +200,7 @@ PRI resetSettings | key, nextKey, ledconf
   settings.commit
   
 PRI boot_stage2 | i
-  settings.setByte(settings#MISC_STAGE_TWO,TRUE)
+  settings.setByte(settings#MISC_STAGE2,TRUE)
  
   outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
 
@@ -291,13 +291,11 @@ pri buttonCheck
       term.stop
 
       if NOT settings.findKey(settings#MISC_TV_MODE) OR settings.getByte(settings#MISC_TV_MODE)==0
-        settings.removeKey($1010)
         settings.setByte(settings#MISC_TV_MODE,term#MODE_PAL)
         term.startWithMode(12,term#MODE_PAL)
         printBanner
         term.str(string("PAL Mode Selected",13))
       else
-        settings.removeKey($1010)
         settings.setByte(settings#MISC_TV_MODE,term#MODE_NTSC)
         term.startWithMode(12,term#MODE_NTSC)
         printBanner
@@ -430,8 +428,7 @@ pub httpServer | i,j,contentLength,authorized
           next
         i:=0
         repeat while contentLength AND i<127
-          char:=websocket.rxtime(1000)
-          buffer[i++]:=char
+          buffer[i++]:=websocket.rxtime(1000)
           contentLength--
         buffer[i]~
         buffer2[0]~
@@ -452,7 +449,6 @@ pub httpServer | i,j,contentLength,authorized
           websocket.str(@CR_LF)
           websocket.str(string("Passwords didn't match.",13,10))
         else
-          settings.removeKey($1010)
           settings.setString(settings#MISC_PASSWORD,@buffer2)  
           settings.commit
            
@@ -506,12 +502,10 @@ pub httpServer | i,j,contentLength,authorized
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
         if httpQuery[0]=="1"
-          settings.removeKey($1010)
           settings.setLong(settings#MISC_LED_CONF,$000A0B09)
           settings.commit
           websocket.str(string("ENABLED (NEEDS REBOOT)",13,10))
         else
-          settings.removeKey($1010)
           settings.removeKey(settings#MISC_LED_CONF)
           settings.commit
           websocket.str(string("DISABLED (NEEDS REBOOT)",13,10))
@@ -525,12 +519,10 @@ pub httpServer | i,j,contentLength,authorized
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
         if httpQuery[0]=="1"
-          settings.removeKey($1010)
           settings.setByte(settings#MISC_AUTOBOOT,1)
           settings.commit
           websocket.str(string("ENABLED",13,10))
         else
-          settings.removeKey($1010)
           settings.removeKey(settings#MISC_AUTOBOOT)
           settings.commit
           websocket.str(string("DISABLED",13,10))
@@ -545,8 +537,7 @@ pub httpServer | i,j,contentLength,authorized
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=ramimage.eeprom"))        
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
         websocket.str(@CR_LF)
-        repeat i from 0 to $7FFF
-          websocket.tx(BYTE[i])
+        websocket.txdata(0,$8000)
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         ifnot authorized
           httpUnauthorized
@@ -558,14 +549,13 @@ pub httpServer | i,j,contentLength,authorized
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
         websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
         websocket.str(string(": "))
-        websocket.dec(constant($8000-settings#SettingsSize))
+        websocket.dec(settings.getLong(settings#MISC_STAGE2_SIZE))
         websocket.str(@CR_LF)        
         websocket.str(@CR_LF)
-        repeat i from 0 to $7FFF-settings#SettingsSize step 128
+        repeat i from 0 to settings.getLong(settings#MISC_STAGE2_SIZE)-1 step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
             quit
-          repeat j from 0 to 127
-            websocket.tx(buffer[j])
+          websocket.txData(@buffer,128)
       elseif strcomp(@httpPath,@CONFIG_BIN_FILE)
         ifnot authorized
           httpUnauthorized
@@ -583,8 +573,7 @@ pub httpServer | i,j,contentLength,authorized
         repeat i from settings#SettingsBottom to settings#SettingsTop step 128
           if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
             quit
-          repeat j from 0 to 127
-            websocket.tx(buffer[j])
+          websocket.txData(@buffer,128)
       elseif strcomp(@httpPath,@CONFIG_PLIST_FILE)
         ifnot authorized
           httpUnauthorized
@@ -687,6 +676,17 @@ pub infoPage | i
     repeat i from 10 to 15
       websocket.hex(byte[@httpQuery][i],2)
     websocket.str(string("';",10))
+
+  if settings.getData(settings#MISC_STAGE2_HASH,@httpQuery,md5#HASH_LENGTH)
+    websocket.str(string("ybox.stage2.hash = '"))
+    repeat i from 0 to md5#HASH_LENGTH-1
+      websocket.hex(byte[@httpQuery][i],2)
+    websocket.str(string("';",10))
+
+  websocket.str(string("ybox.stage2.size = "))
+  websocket.dec(settings.getLong(settings#MISC_STAGE2_SIZE))
+  websocket.str(string(";",10))
+
     
   websocket.str(string("ybox.uptime = "))
   websocket.dec(subsys.RTC)
@@ -702,7 +702,7 @@ PRI configPList | key,ptr,printable
   repeat
     ifnot key
       quit
-    if key==$1010
+    if key==settings#MISC_STAGE2_SIZE
       next
     websocket.str(string("    "))
     websocket.dec(key)
@@ -787,7 +787,7 @@ pub indexPage(authorized) | i
     websocket.str(string("MAC: "))
     repeat i from 0 to 5
       if i
-        websocket.tx("-")
+        websocket.tx(":")
       websocket.hex(byte[@httpMethod][i],2)
     endInfo
 
@@ -929,10 +929,10 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
 
         if stage_two
           ' Do we have the correct number of bytes?
-          if settings.findKey($1010) AND ((total+i) <> settings.getWord($1010))
+          if settings.findKey(settings#MISC_STAGE2_SIZE) AND ((total+i) <> settings.getWord(settings#MISC_STAGE2_SIZE))
             subsys.chirpSad
             term.out(13)
-            term.dec((total+i) - settings.getWord($1010))
+            term.dec((total+i) - settings.getWord(settings#MISC_STAGE2_SIZE))
             term.str(string(" byte diff!",13))
             abort -4                     
 
@@ -994,7 +994,9 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
         term.str(string(" bytes written",13))
         subsys.chirpHappy
         subsys.FadeToColor(0,255,0,200)
-        settings.setWord($1010,total)
+        settings.setWord(settings#MISC_STAGE2_SIZE,total)
+        settings.setData(settings#MISC_STAGE2_HASH,@hash,md5#HASH_LENGTH)
+        settings.commit
         return 0
 
 
