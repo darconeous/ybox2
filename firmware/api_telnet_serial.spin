@@ -44,6 +44,7 @@ PUB waitConnectTimeout(ms) | t
   repeat until isConnected or (((cnt - t) / (clkfreq / 1000)) > ms)
     if listening
       ifnot tcp.isValidHandle(_handle)
+        'abort _handle+50
         listen(listenport)
   return isConnected
   

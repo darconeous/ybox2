@@ -25,20 +25,20 @@ DAT
 ' See the settings object for more details.
 local_macaddr   byte    $02, $00, $00, $00, $00, $01
 local_mtu       word    1500
+bcast_ipaddr    long    $FFFFFFFF
+any_ipaddr    long    $00000000
 ip_addr         byte    0,0,0,0            ' device's ip address
 ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
 ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
 ip_dns          byte    $04,$02,$02,$04          ' network dns        
 ip_maxhops      byte    $80
  
- 
-bcast_ipaddr    long    $FFFFFFFF
-any_ipaddr    long    $00000000
 bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
+
 DAT
   stack       long 0[200]
   randseed    long 0
-  
+  socketlockid long -1  
 DAT             
 
   ' Global variables (accessable between cogs)
@@ -67,6 +67,9 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 
   stop
   q.init
+
+  if(SocketLockID := locknew) == -1
+    abort FALSE
   
   random.start
   randseed := random.random
@@ -483,6 +486,10 @@ PRI send_tcppacket(handle_addr,flags,data,datalen) | hdrlen, hdr_chksum
 
   LONG[handle_addr + sMySeqNum]+= datalen               ' update running sequence number
     
+PRI socketLock
+  repeat while NOT lockset(SocketLockid)
+PRI socketUnlock
+  lockclr(SocketLockid)
 
 PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   ' Search for socket, matches ip address, port states
@@ -638,9 +645,11 @@ PUB listen(port) | handle, handle_addr, x
 '' Nonblocking
 
   ' just find any avail closed socket
+  socketlock
   handle := \find_socket(0, 0, 0)
   
   if handle < 0
+    socketunlock
     return -1
 
   handle_addr := @sSockets + (sSocketBytes * handle)
@@ -649,9 +658,16 @@ PUB listen(port) | handle, handle_addr, x
   bytefill(handle_addr,0,sSocketBytes)
 
   LONG[handle_addr + sAge] := long[RTCADDR]
-  BYTE[handle_addr + sSockQTx] := q.new
+
+  if (x:=\q.new)<0
+    socketunlock
+    return -1
+  else
+    BYTE[handle_addr + sSockQTx] := x
+    
   if (x:=\q.new)<0
     q.delete(BYTE[handle_addr + sSockQTx]~)
+    socketunlock
     return -1
   else
     BYTE[handle_addr + sSockQRx] := x
@@ -662,6 +678,8 @@ PUB listen(port) | handle, handle_addr, x
   ' it's now listening
   BYTE[handle_addr + sConState] := SLISTEN
 
+  socketunlock
+
   return handle 
 
 PUB connect(ip, remoteport, localport) | handle, handle_addr,x
@@ -670,9 +688,11 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
 '' Nonblocking
 
   ' just find any avail closed socket
+  socketlock
   handle := \find_socket(0, 0, 0)
 
   if handle < 0
+    socketunlock
     return -1
 
   handle_addr := @sSockets + (sSocketBytes * handle)
@@ -680,9 +700,15 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   ' Start with a clean slate
   bytefill(handle_addr,0,sSocketBytes)
   
-  BYTE[handle_addr + sSockQTx] := q.new
+  if (x:=\q.new)<0
+    socketunlock
+    return -1
+  else
+    BYTE[handle_addr + sSockQTx] := x
+    
   if (x:=\q.new)<0
     q.delete(BYTE[handle_addr + sSockQTx]~)
+    socketunlock
     return -1
   else
     BYTE[handle_addr + sSockQRx] := x
@@ -695,13 +721,15 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   LONG[handle_addr + sAge] := long[RTCADDR]
 
   BYTE[handle_addr + sConState] := SCONNECTINGARP1
+  socketunlock
   
   return handle
 
 PUB close(handle) | handle_addr
 '' Closes a connection
+  socketlock
   handle_addr := @sSockets + (sSocketBytes * handle)
-  if isConnected(handle) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
+  if \isConnected(handle) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
     repeat while BYTE[handle_addr + sConState]==SCLOSING
@@ -713,6 +741,7 @@ PUB close(handle) | handle_addr
     bytefill(handle_addr,0,sSocketBytes-1)
     LONG[handle_addr + sAge] := long[RTCADDR]
     BYTE[handle_addr + sConState] := SCLOSED
+  socketunlock
 
 PUB closeall | handle
   repeat handle from 0 to constant(sNumSockets - 1)
@@ -720,7 +749,8 @@ PUB closeall | handle
     
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise
-
+  if handle => 2 OR handle < 0
+    abort handle
   handle_addr := @sSockets + (sSocketBytes * handle)
   if BYTE[handle_addr + sConState] == SESTABLISHED
     return true
@@ -734,6 +764,9 @@ PUB isEOF(handle) | handle_addr
 PUB isValidHandle(handle) | handle_addr
 '' Checks to see if the handle is valid, handles will become invalid once they are used
 '' In other words, a closed listening socket is now invalid, etc
+
+  if handle => 2 OR handle < 0
+    abort handle
 
   handle_addr := @sSockets + (sSocketBytes * handle)
 
@@ -810,7 +843,7 @@ CON
 '         1 byte  - (1 byte ) handle index
 ' total: 32 bytes
 
-  sSocketBytes  = 36      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
+  sSocketBytes  = 40      ' MUST BE MULTIPLE OF 4 (long aligned) set this to total socket state data size
   
   sNumSockets = 2         ' number of sockets
 

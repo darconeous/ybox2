@@ -164,18 +164,16 @@ pri httpUnauthorized
   socket.str(@CR_LF)
   socket.str(@HTTP_401)
 
-pub httpServer | char, i, lineLength,contentLength,authorized
+pub httpServer | char, i, contentLength,authorized
 
   repeat
-    'term.str(string("Prepping...",13))
     repeat while \socket.listen(80) == -1
-      'term.str(string("Unable to listen!",13))
       if ina[subsys#BTTNPin]
         reboot
       delay_ms(100)
       socket.closeall
       next
-    'term.str(string("Waiting",13))
+
     repeat while NOT socket.isConnected
       socket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
@@ -183,13 +181,8 @@ pub httpServer | char, i, lineLength,contentLength,authorized
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
-    'term.str(string("Connected",13))
-
-    'repeat while socket.isConnected
-    '  term.out(socket.rxtime(1000))
     
     http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
-    'term.str(string("Parsed Request",13))
     
     contentLength:=0
     repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)

@@ -15,11 +15,13 @@ CON
 
 OBJ
 
-  tel           : "api_telnet_serial"
+  websocket     : "api_telnet_serial"
   term          : "TV_Text"
-'  ir            : "ir_reader_sony"
   subsys        : "subsys"
   settings      : "settings"
+  http          : "http"
+  base64        : "base64"
+  tel           : "api_telnet_serial"
                                      
 VAR
   byte path_holder[128]
@@ -28,11 +30,11 @@ VAR
   ' Statistics
   long stat_refreshes
   long stat_errors
-  
+
+  long weatherstack[200]  
 DAT
 productName   BYTE      "ybox2 info widget",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
-weatherstack  LONG      0[200]
   
 PUB init | i
   dira[0]:=1 ' Set direction on reset pin
@@ -88,7 +90,7 @@ PUB init | i
       reboot
   
   outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
-  if not \websocket.start(1,2,3,4,6,7,-1,-1)
+  if not \tel.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     SadChirp
@@ -118,6 +120,7 @@ PUB init | i
     term.dec(byte[@weatherstack][i])
   term.out(13)  
 
+
   if settings.getData(settings#NET_IPv4_DNS,@weatherstack,4)
     term.str(string("DNS ADDR: "))
     repeat i from 0 to 3
@@ -146,9 +149,22 @@ PUB init | i
     term.str(@weatherstack)
     term.str(string("'",13))
    
-  HappyChirp
 
-  main
+  cognew(WeatherUpdate, @weatherstack) 
+
+  repeat
+    HappyChirp
+    i:=\httpServer
+    term.out("[")
+    term.dec(i)
+    term.out("]")
+     
+    subsys.StatusFatalError
+    SadChirp
+    delay_ms(40000)
+    websocket.closeAll
+  reboot
+
 PRI initial_configuration
 
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
@@ -163,12 +179,13 @@ PRI initial_configuration
 }
   return TRUE
   
+{{
 PUB main
-  delay_ms(1000) ' Wait a second to let the ethernet stabalize
+  'delay_ms(1000) ' Wait a second to let the ethernet stabalize
 
-  cognew(WeatherUpdate, @weatherstack) 
-  repeat
-  'delay_ms(2000) ' Wait a second to let the ethernet stabalize
+  'cognew(WeatherUpdate, @weatherstack) 
+  'repeat
+  'delay_ms(5000) ' Wait a second to let the ethernet stabalize
   
   \httpServer
 
@@ -176,7 +193,6 @@ PUB main
   SadChirp
   reboot
     
-{{
   return
   
   repeat while true
@@ -229,10 +245,12 @@ PUB main
     if ircode == $02
       subsys.StatusFatalError
 }}    
+
 pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
   port := 20000
   retrydelay := 500
   repeat
+    subsys.StatusLoading
   
     if port > 30000
       port := 20000
@@ -282,7 +300,6 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
             term.str(string($B,12))    
             term.dec(subsys.RTC) ' Print out the RTC value
             delay_ms(30000)     ' 30 sec delay
-            subsys.StatusLoading
             quit
           if cnt-timeout>10*clkfreq ' 10 second timeout      
             subsys.StatusErrorCode(subsys#ERR_DISCONNECTED)
@@ -303,6 +320,7 @@ pub WeatherUpdate | timeout, retrydelay, addr, port, gotstart,in ,lineLength
       if retrydelay < 10_000
          retrydelay+=retrydelay
       delay_ms(retrydelay)             ' failed to connects     
+
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
@@ -310,23 +328,19 @@ PUB showMessage(str)
 
 pub HappyChirp
   subsys.chirpHappy
-pub SadChirp | i
+pub SadChirp
   subsys.chirpSad
     
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
-OBJ
-  websocket     : "api_telnet_serial"
-  base64        : "base64"
-  http          : "http"
 VAR
   byte httpMethod[8]
   byte httpPath[64]
-  byte httpQuery[160]
+  byte httpQuery[64]
   byte httpHeader[32]
-  byte buffer[160]
-  byte buffer2[160]
+  byte buffer[128]
+  byte buffer2[128]
 DAT
 HTTP_200      BYTE      "HTTP/1.1 200 OK"
 CR_LF         BYTE      13,10,0
@@ -393,32 +407,30 @@ PUB atoi(inptr):retVal | i,char
         quit
          
 
-pub httpServer | i, contentSize,authorized
+pub httpServer | i, contentLength,authorized
   repeat
-    repeat while \websocket.listen(80) < 0
+    repeat while websocket.listen(80) < 0
       if ina[subsys#BTTNPin]
         reboot
       delay_ms(1000)
       websocket.closeall
       next
-
-    repeat while NOT websocket.isConnected
-      'websocket.waitConnectTimeout(100)
+    
+    repeat while NOT websocket.waitConnectTimeout(100)
       if ina[subsys#BTTNPin]
         reboot
-    
-    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
-      websocket.close
-      next
 
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
+    contentLength:=0
 
-    contentSize:=0
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
+      websocket.close
+      next
         
     repeat while \http.getNextHeader(websocket.handle,@httpHeader,32,@buffer,128)>0
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
-        contentSize:=atoi(@buffer)
+        contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
         ' Skip past the word "Basic"
         repeat i from 0 to 7
