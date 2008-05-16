@@ -311,7 +311,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
   ifnot compare_ipaddr(pkt+ip_destaddr,@ip_addr)
     ' Only let TCP work if the destination matches our address.
-    abort
+    abort -1
 
   bytemove(@srcip, pkt + ip_srcaddr, 4)
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
@@ -330,7 +330,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
   if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     reject_tcp
-    abort handle_addr
+    abort -1
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0 AND datain_len > 0
     ' ACK, without SYN, with data
 
@@ -393,7 +393,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' We only want to ACK a FIN if we have received everything up to this point.
     if seq<>LONG[handle_addr + sMyAckNum]
       send_tcppacket(handle_addr,TCP_ACK,0,0)
-      abort  ' Bad sequence Num!
+      abort -1 ' Bad sequence Num!
 
     ' get updated sequence and ack numbers (gaurantee we have correct ones to kill connection with)
     bytemove(handle_addr + sMySeqNum, pkt + TCP_acknum, 4)

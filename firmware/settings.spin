@@ -116,10 +116,11 @@ PUB commit | addr, i
   repeat i from 0 to SettingsSize/EEPROMPageSize-1
     if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset, addr, EEPROMPageSize)
       unlock
-      abort FALSE
+      abort -1
     repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset)
     addr+=EEPROMPageSize
   unlock
+  return 0
 
 pri isValidEntry(iter)
   return (iter > SettingsBottom) AND word[iter] AND (byte[iter-2]==(byte[iter-3]^$FF))
@@ -193,7 +194,7 @@ PUB setData(key,ptr,size_): iter
 
   ' Runtime sanity check.
   if size_>255
-    abort FALSE
+    abort -666
 
   ' Traverse to the end of the last setting
   repeat while isValidEntry(iter)
@@ -202,7 +203,7 @@ PUB setData(key,ptr,size_): iter
   ' Make sure there is enough space left
   if iter-3-size_<SettingsBottom
     unlock
-    abort FALSE
+    abort -667
 
   ' Append the new setting  
   word[iter]:=key

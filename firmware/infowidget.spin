@@ -263,7 +263,8 @@ pub WeatherCog | retrydelay,port,err
       subsys.StatusErrorCode(err)
       stat_errors++
       showMessage(string("Error!"))    
-      tel.close
+      tel.closeall
+      websocket.closeall
       if retrydelay < 10_000
          retrydelay+=retrydelay
       delay_ms(retrydelay)             ' failed to connect     
@@ -301,7 +302,7 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i
     tel.txmimeheader(string("Connection"),string("close"))
     tel.str(@CR_LF)
    
-    repeat while http.getNextHeader(tel.handle,0,0,0,0)>0
+    repeat while \http.getNextHeader(tel.handle,0,0,0,0)>0
         
     timeout := cnt
     i:=0
