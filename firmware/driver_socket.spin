@@ -49,7 +49,10 @@ DAT
 
   pkt_id      long 0                  ' packet fragmentation id
   pkt_isn     long 0                  ' packet initial sequence number
-  
+DAT
+
+last_listen_port WORD   0
+last_listen_time LONG   0
 
 PUB init
 '  term.start(12)
@@ -264,12 +267,12 @@ PRI handle_icmp | i,pkt_len
         ++pkt_id
 
         ' Reply to the same MAC
-        bytemove(pkt + enetpacketDest0, pkt + enetpacketSrc0, 6)
-        bytemove(pkt + enetpacketSrc0, @local_macaddr, 6)                             ' Set source mac address
+        wordmove(pkt + enetpacketDest0, pkt + enetpacketSrc0, 3)
+        wordmove(pkt + enetpacketSrc0, @local_macaddr, 3)                             ' Set source mac address
 
         ' Reply to the same IP
-        bytemove(pkt + ip_destaddr, pkt + ip_srcaddr, 4)
-        bytemove(pkt + ip_srcaddr, @ip_addr, 4)
+        wordmove(pkt + ip_destaddr, pkt + ip_srcaddr, 2)
+        wordmove(pkt + ip_srcaddr, @ip_addr, 2)
   
         BYTE[pkt][ip_id] := pkt_id >> 8
         BYTE[pkt][ip_id+1] := pkt_id
@@ -318,7 +321,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
   if (handle := \find_socket(srcip, dstport, srcport))==-1
-    reject_tcp
+    ' If this is a syn packet and we have listened on this port in the past 10 seconds then just drop the packet.
+    ifnot dstport==last_listen_port AND LONG[RTCADDR]<last_listen_time+10 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN)
+      reject_tcp
     abort -1
   handle_addr := @sSockets + (sSocketBytes * handle)
 
@@ -529,9 +534,11 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       ' Check to see if we have data to send, if we do, send it
       ' If we have hit out next ack marker, send an ACK
 
-      if NOT q.isEmpty(BYTE[handle_addr+sSockQTx])
-        i := q.pullData(BYTE[handle_addr+sSockQTx],pkt+TCP_data,1000)
-        send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt+TCP_data,i)
+      i := local_mtu-TCP_DATA
+      ' TODO: If dest window is smaller than i, replace i with dest window size
+      if i AND NOT q.isEmpty(BYTE[handle_addr+sSockQTx])
+        i := q.pullData(BYTE[handle_addr+sSockQTx],pkt,i)
+        send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt,i)
       else
         i:=q.bytesFree(BYTE[handle_addr + sSockQRx])
         if i<MIN_ADVERTISED_WINDOW
@@ -680,6 +687,10 @@ PUB listen(port) | handle, handle_addr, x
 
   socketunlock
 
+  ' Little hack
+  last_listen_port:=port
+  last_listen_time:=long[RTCADDR]
+  
   return handle 
 
 PUB connect(ip, remoteport, localport) | handle, handle_addr,x

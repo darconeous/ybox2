@@ -14,7 +14,8 @@ OBJ
   numbers       : "numbers"
   socket        : "api_telnet_serial"
   http          : "http"
-  base64        : "base64"                                   
+  base64        : "base64"
+  auth          : "auth_basic"                                   
 VAR
   long stack[100] 
   byte stage_two
@@ -157,10 +158,11 @@ HTTP_401      BYTE      "HTTP/1.1 401 Authorization Required",13,10,0
 
 HTTP_CONTENT_TYPE_HTML  BYTE "Content-Type: text/html; charset=utf-8",13,10,0
 HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
-pri httpUnauthorized
+pri httpUnauthorized(authorized)
   socket.str(@HTTP_401)
   socket.str(@HTTP_CONNECTION_CLOSE)
-  socket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  auth.generateChallenge(@buffer,127,authorized)
+  socket.txMimeHeader(string("WWW-Authenticate"),@buffer)
   socket.str(@CR_LF)
   socket.str(@HTTP_401)
 
@@ -189,31 +191,19 @@ pub httpServer | char, i, contentLength,authorized
       if strcomp(@httpHeader,string("Content-Length"))
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        ' Skip past the word "Basic"
-        repeat i from 0 to 7
-          if buffer[i]==" "
-            i++
-            quit
-          if buffer[i]==0
-            quit
-        base64.inplaceDecode(@buffer+i)  
-        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
-        authorized:=strcomp(@buffer+i,@buffer2)
-
-    'term.str(string("Parsed Headers",13))
+        authorized:=auth.authenticateResponse(@buffer)
                
     if strcomp(@httpMethod,string("GET"))
       hits++
       if strcomp(@httpPath,string("/"))
-        'term.str(string("Index Page",13))
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONTENT_TYPE_HTML)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         indexPage
       elseif strcomp(@httpPath,string("/reboot"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           socket.close
           next
         socket.str(@HTTP_200)

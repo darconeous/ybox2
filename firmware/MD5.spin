@@ -30,10 +30,10 @@ PUB hash(dataptr,datalen,h)
   hashfinish(dataptr,datalen,datalen,h)
   
 PUB hashStart(h)
-  bytemove(h,@initial_hash,HASH_LENGTH)
+  longmove(h,@initial_hash,constant(HASH_LENGTH/4))
   
 PUB hashBlock(dataptr,h)|i,a,b,c,d,f,g,tmp
-  bytemove(@a,h,HASH_LENGTH)
+  longmove(@a,h,constant(HASH_LENGTH/4))
   repeat i from 0 to 63
     case i
       0 .. 15:
@@ -65,15 +65,15 @@ PUB hashFinish(dataptr,datalen,totallen,h)|a[BLOCK_LENGTH/4]
     hashBlock(dataptr,h)
     datalen-=BLOCK_LENGTH
     dataptr+=BLOCK_LENGTH
-  bytefill(@a,0,BLOCK_LENGTH)
+  longfill(@a,0,constant(BLOCK_LENGTH/4))
   bytemove(@a,dataptr,datalen)
   BYTE[@a][datalen]:=$80
   if datalen>BLOCK_LENGTH-9
     hashBlock(@a,h)     
-    bytefill(@a,0,BLOCK_LENGTH)
+    longfill(@a,0,constant(BLOCK_LENGTH/4))
   LONG[@a][14]:=totallen*8
   hashBlock(@a,h)     
-  bytefill(@a,0,BLOCK_LENGTH)
+  longfill(@a,0,constant(BLOCK_LENGTH/4))
 CON
 {{
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

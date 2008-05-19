@@ -1,9 +1,11 @@
 {{ Ring buffer
 ** A more simple version of q.spin with the same API.
 }}
-CON
+CON {{ Tweakable constants }}
   Q_MAX = 4
-  Q_SIZE = 512   ' MUST BE A POWER OF TWO
+  Q_BITS = 9
+CON {{ Non-tweakable constants }}
+  Q_SIZE = 1<<Q_BITS   ' MUST BE A POWER OF TWO
   buffer_mask   = Q_SIZE - 1
 CON
   ERR_Q_FULL       = -1
@@ -14,17 +16,18 @@ CON
   ERR_RUNTIME       = -10
 
 DAT
-  buffer byte 0[Q_MAX*Q_SIZE+1]
+  q_next      byte 0
+  q_lock      long -1  
+  buffer      byte 0[Q_MAX*Q_SIZE]
+  buffer_next byte 0[Q_MAX]
   writepoint  word 0[Q_MAX]
-  readpoint    word 0[Q_MAX]
+  readpoint   word 0[Q_MAX]
   
-  q_next byte 0
-  q_lock long -1
 PUB init | i
   if q_lock==-1
     q_next:=0
     repeat i from 0 to Q_MAX-1
-      buffer[i*Q_SIZE]:=i+1     
+      buffer_next[i]:=i+1     
     if(q_lock := locknew) == -1
       abort FALSE
   return TRUE
@@ -39,9 +42,9 @@ PUB new : i | p
   if i=>Q_MAX
     unlock
     abort ERR_OUT_OF_QUEUES
-  q_next:=buffer[i*Q_SIZE]
-  writepoint[i]:=0
-  readpoint[i]:=0
+  q_next:=buffer_next[i]
+  writepoint[i]~
+  readpoint[i]~
   i++
   unlock
   
@@ -60,7 +63,7 @@ PUB delete(i) | old_page
   lock
 
   ' Insert Queue back into pool
-  buffer[i*Q_SIZE]:=q_next
+  buffer_next[i]:=q_next
   q_next:=i
 
   unlock
@@ -76,7 +79,7 @@ PUB push(i,b) | p
     abort ERR_Q_INVALID
 
   if (readpoint[i]<> (writepoint[i] + 1) & buffer_mask)
-    buffer[i*Q_SIZE+writepoint[i]+1]:=b
+    buffer[i<<Q_BITS+writepoint[i]]:=b
     writepoint[i] := (writepoint[i] + 1) & buffer_mask
   else   
     abort ERR_Q_FULL
@@ -91,12 +94,12 @@ PUB pushData(i,ptr,len)
   i--
 
   if len+writepoint[i]>Q_SIZE
-    bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, Q_SIZE-writepoint[i])
+    bytemove(@buffer+i<<Q_BITS+writepoint[i], ptr, Q_SIZE-writepoint[i])
     ptr+=Q_SIZE-writepoint[i]
-    bytemove(@buffer+i*Q_SIZE+1, ptr, len-(Q_SIZE-writepoint[i]))
+    bytemove(@buffer+i<<Q_BITS, ptr, len-(Q_SIZE-writepoint[i]))
     writepoint[i] := (writepoint[i] + len) & buffer_mask
   else
-    bytemove(@buffer+i*Q_SIZE+writepoint[i]+1, ptr, len)
+    bytemove(@buffer+i<<Q_BITS+writepoint[i], ptr, len)
     writepoint[i] := (writepoint[i] + len) & buffer_mask
 
   return 1  
@@ -107,7 +110,7 @@ PUB pull(i) : val | p
     abort ERR_Q_INVALID
 
   if (readpoint[i]<>writepoint[i])
-    val := buffer[i*Q_SIZE+readpoint[i]+1]
+    val := buffer[i<<Q_BITS+readpoint[i]]
     readpoint[i] := (readpoint[i] + 1) & buffer_mask
   else
     abort ERR_Q_EMPTY
@@ -125,12 +128,12 @@ PUB pulldata(i,ptr,maxlen) : len | char
     return
       
   if len+readpoint[i]>Q_SIZE
-    bytemove(ptr,@buffer+i*Q_SIZE+readpoint[i]+1, Q_SIZE-readpoint[i])
+    bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], Q_SIZE-readpoint[i])
     ptr+=Q_SIZE-readpoint[i]
-    bytemove(ptr,@buffer+i*Q_SIZE+1, len-(Q_SIZE-readpoint[i]))
+    bytemove(ptr,@buffer+i<<Q_BITS, len-(Q_SIZE-readpoint[i]))
     readpoint[i] := (readpoint[i] + len) & buffer_mask
   else
-    bytemove(ptr,@buffer+i*Q_SIZE+readpoint[i]+1, len)
+    bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], len)
     readpoint[i] := (readpoint[i] + len) & buffer_mask
 
 PUB isEmpty(i)

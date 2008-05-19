@@ -44,7 +44,6 @@ PUB waitConnectTimeout(ms) | t
   repeat until isConnected or (((cnt - t) / (clkfreq / 1000)) > ms)
     if listening
       ifnot tcp.isValidHandle(_handle)
-        'abort _handle+50
         listen(listenport)
   return isConnected
   
@@ -70,15 +69,13 @@ PUB rxcheck
 
   return tcp.readByteNonBlocking(_handle)
 
-PUB rxtime(ms) : rxbyte | t
+PUB rxtime(ms) : rxbyte
   rxbyte:=-1
-  t := cnt
   if _handle=>0
-    repeat until (rxbyte := rxcheck) => 0 or (cnt - t) / (clkfreq / 1000) > ms
+    rxbyte:=tcp.readByteTimeout(_handle,ms)
 
-PUB rx : rxbyte
-
-  repeat while (rxbyte := rxcheck) < 0
+PUB rx
+  return tcp.readByte(_handle)
 
 PUB txcheck(txbyte)
 
@@ -86,10 +83,9 @@ PUB txcheck(txbyte)
     ifnot tcp.isValidHandle(_handle)
       listen(listenport)
 
-  return tcp.writeByteNonBlocking(handle, txbyte)
+  return tcp.writeByteNonBlocking(_handle, txbyte)
   
 PUB tx(txbyte)
-
   repeat while isConnected and (txcheck(txbyte) < 0)
 
 PUB txdata(ptr,len)

@@ -19,9 +19,9 @@ OBJ
   settings      : "settings"
   eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
-  base64        : "base64"
   http          : "http"
-  md5           : "md5"
+  md5           : "MD5"
+  auth          : "auth_basic"                                   
 VAR
   long stage_two
   long stack[10] 
@@ -85,7 +85,10 @@ PUB init | i, tv_mode
       subsys.StatusFatalError
       subsys.chirpSad
       delay_ms(20000)
-      reboot
+    else
+      subsys.chirpHappy
+      delay_ms(2000)
+    reboot
 
   ' Print out the MAC address on the TV
   if settings.getData(settings#NET_MAC_ADDR,@stack,6)
@@ -350,10 +353,11 @@ CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
   
 
-pri httpUnauthorized
+pri httpUnauthorized(authorized)
   websocket.str(@HTTP_401)
   websocket.str(@HTTP_CONNECTION_CLOSE)
-  websocket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  auth.generateChallenge(@buffer,127,authorized)
+  websocket.txMimeHeader(string("WWW-Authenticate"),@buffer)
   websocket.str(@CR_LF)
   websocket.str(@HTTP_401)
 
@@ -364,7 +368,7 @@ pri httpNotFound
   websocket.str(@HTTP_404)
 
      
-pub httpServer | i,j,contentLength,authorized
+pub httpServer | i,j,contentLength,authorized,stale
   repeat
     repeat while \websocket.listen(80) < 0
       buttonCheck
@@ -387,17 +391,8 @@ pub httpServer | i,j,contentLength,authorized
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
         contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        ' Skip past the word "Basic"
-        repeat i from 0 to 7
-          if buffer[i]==" "
-            i++
-            quit
-          if buffer[i]==0
-            quit
-        base64.inplaceDecode(@buffer+i)  
-        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
-        authorized:=strcomp(@buffer+i,@buffer2)
-
+        authorized:=auth.authenticateResponse(@buffer)
+        
     ' Authorization check
     ' You can comment this out if you want to
     ' be able to let unauthorized people see the
@@ -405,8 +400,8 @@ pub httpServer | i,j,contentLength,authorized
     ' or download firmware, or change settings
     ' without being authorized because those
     ' actions check for authorization anyway.
-    'ifnot authorized
-    '  httpUnauthorized
+    'if authorized<>auth#STAT_AUTH
+    '  httpUnauthorized(authorized)
     '  next
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
@@ -422,8 +417,8 @@ pub httpServer | i,j,contentLength,authorized
         websocket.str(@CR_LF)
         infoPage
       elseif strcomp(@httpPath,string("/password"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         i:=0
@@ -435,7 +430,7 @@ pub httpServer | i,j,contentLength,authorized
         i:=http.getFieldFromQuery(@buffer,string("username"),@buffer2,127)
         if i
           buffer2[i++]:=":"
-          j:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2+i,63)
+          j:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2+i,127-i)
           ifnot j
              i~
           else
@@ -447,10 +442,9 @@ pub httpServer | i,j,contentLength,authorized
           websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
           websocket.str(@HTTP_CONNECTION_CLOSE)
           websocket.str(@CR_LF)
-          websocket.str(string("Passwords didn't match.",13,10))
+          websocket.str(string("Passwords didn't match, or something else was wrong.",13,10))
         else
-          settings.setString(settings#MISC_PASSWORD,@buffer2)  
-          settings.commit
+          auth.setAdminPassword(@httpQuery)
            
           websocket.str(@HTTP_303)
           websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
@@ -484,8 +478,8 @@ pub httpServer | i,j,contentLength,authorized
         delay_ms(100)
         boot_stage2
       elseif strcomp(@httpPath,string("/login"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close                                                               
           next
         websocket.str(@HTTP_303)
@@ -494,8 +488,8 @@ pub httpServer | i,j,contentLength,authorized
         websocket.str(@CR_LF)
         websocket.str(@OK)
       elseif strcomp(@httpPath,string("/ledconfig"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_200)
@@ -510,8 +504,8 @@ pub httpServer | i,j,contentLength,authorized
           settings.commit
           websocket.str(string("DISABLED (NEEDS REBOOT)",13,10))
       elseif strcomp(@httpPath,string("/autoboot"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_303)
@@ -527,8 +521,8 @@ pub httpServer | i,j,contentLength,authorized
           settings.commit
           websocket.str(string("DISABLED",13,10))
       elseif strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE)
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_200)
@@ -539,8 +533,8 @@ pub httpServer | i,j,contentLength,authorized
         websocket.str(@CR_LF)
         websocket.txdata(0,$8000)
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_200)
@@ -557,8 +551,8 @@ pub httpServer | i,j,contentLength,authorized
             quit
           websocket.txData(@buffer,128)
       elseif strcomp(@httpPath,@CONFIG_BIN_FILE)
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_200)
@@ -575,8 +569,8 @@ pub httpServer | i,j,contentLength,authorized
             quit
           websocket.txData(@buffer,128)
       elseif strcomp(@httpPath,@CONFIG_PLIST_FILE)
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
           websocket.close
           next
         websocket.str(@HTTP_200)
@@ -587,8 +581,8 @@ pub httpServer | i,j,contentLength,authorized
       else           
         httpNotFound
     elseif strcomp(@httpMethod,string("PUT"))
-      ifnot authorized
-        httpUnauthorized
+      if authorized<>auth#STAT_AUTH
+        httpUnauthorized(authorized)
         websocket.close
         next
       if not contentLength

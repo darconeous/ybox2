@@ -16,7 +16,7 @@
         and written-to sparingly.
 
         The data is stored at the end of hub ram, starting at $8000
-        and expanding downward.
+        and expanding *downward*.
 
         The format is as follows (in reverse!):
 
@@ -24,7 +24,7 @@
         1 Byte                  Data Length
         1 Byte                  Check Byte (Ones complement of key length)
         x Bytes                 Data
-        1 Byte (Optional)       Padding, if size is odd
+        1 Byte (If necessary)   Padding, if size is odd
 
         The data is filled in from back to front, so that the
         size of settings area can be adjusted later without
@@ -36,6 +36,23 @@
         the actual data contained in a variable isn't stored
         backward. Doing so would have made things more complicated
         without any obvious benefit.
+
+        Limitations/implications:
+          * The maxumum data size is 255 bytes.
+          * Zero-length entries are valid.
+          * The key value of zero is reserved.
+          * Two entries cannot have the same key.
+          * A valid entry must:
+            * have a non-zero key.
+            * have a correct check byte.
+            * have a length which doesn't extend beyond
+              the settings boundary.
+          * The first invalid entry encountered marks
+            the start of free space. 
+
+        TRIVIA: The data format for this object is based
+        loosely on the OLPC XO-1 manufacturing data,
+        documented here: http://wiki.laptop.org/go/Manufacturing_Data
 }} 
 CON { Tweakable parameters }
   SettingsSize = $400
@@ -54,7 +71,7 @@ CON { Keys for various stuff }
   MISC_LED_CONF      = "l"+("c"<<8) ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
   MISC_TV_MODE       = "t"+("v"<<8) ' 1 byte, 0=NTSC, 1=PAL
 
-  MISC_STAGE2     = "2"+("2"<<8)
+  MISC_STAGE2        = "2"+("2"<<8)
 
   MISC_STAGE2_SIZE   = "2"+("S"<<8)
   MISC_STAGE2_HASH   = "2"+("H"<<8)
@@ -84,7 +101,7 @@ PUB start
   eeprom.Initialize(eeprom#BootPin)
 
   ' If we don't have any environment variables, try to load the defaults from EEPROM
-  if not size
+  ifnot size
     revert
 
   return TRUE
@@ -102,8 +119,7 @@ PUB purge
   bytefill(SettingsBottom,$FF,SettingsSize) 
   unlock
 PUB stop
-  lockret(SettingsLock)
-  SettingsLock := -1
+  lockret(SettingsLock~~)
 PRI lock
   repeat while NOT lockset(SettingsLock)
 PRI unlock
@@ -222,7 +238,7 @@ PUB setData(key,ptr,size_): iter
 PUB getString(key,ptr,size_): strlen
   strlen:=getData(key,ptr,size_-1)
   ' Strings must be zero terminated.
-  byte[ptr][strlen]:=0  
+  byte[ptr][strlen]~  
   
 PUB setString(key,ptr)
   return setData(key,ptr,strsize(ptr))  

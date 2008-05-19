@@ -2,20 +2,21 @@ obj
   tcp : "driver_socket"
 CON
   TIMEOUT       = 1000
+
 pub getFieldFromQuery(packeddataptr,keystring,outvalue,outsize) | i,char
   i:=0
   repeat while BYTE[packeddataptr]
     if BYTE[packeddataptr]=="=" 'AND strsize(keystring)==i
       packeddataptr++
       i:=0
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND i<outsize-2
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND byte[packeddataptr]<>";" AND i<outsize-2
          BYTE[outvalue][i++]:=byte[packeddataptr++]
       BYTE[outvalue][i]:=0
       unescapeURLInPlace(outvalue)
       return i
     if BYTE[packeddataptr] <> BYTE[keystring][i]
-      ' skip to &
-      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&"
+      ' skip to & or ;
+      repeat while byte[packeddataptr] AND byte[packeddataptr]<>"&" AND byte[packeddataptr]<>";"
         packeddataptr++
       ifnot byte[packeddataptr] 
         quit
@@ -51,6 +52,7 @@ pub unescapeURLInPlace(in_ptr) | out_ptr,char,val
   byte[out_ptr++]:=0
   return TRUE
 pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen): count|char
+{{ NOTE: Doesn't support folded headers, as defined in RFC 822! }}
   valueLen--
   nameLen--
   repeat while not tcp.isEOF(handle)
