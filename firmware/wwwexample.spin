@@ -125,7 +125,7 @@ PUB init | i
  
   repeat
     i:=\httpServer
-    subsys.chirpSad
+    subsys.click
     term.str(string("HTTP SERVER EXCEPTION "))
     term.dec(i)
     term.out(13)

@@ -321,8 +321,11 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
   if (handle := \find_socket(srcip, dstport, srcport))==-1
-    ' If this is a syn packet and we have listened on this port in the past 10 seconds then just drop the packet.
-    ifnot dstport==last_listen_port AND LONG[RTCADDR]<last_listen_time+10 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN)
+    ' If this is a syn packet and we have listened on this
+    ' port in the past 5 seconds then just drop the packet.
+    ' Hopefully we'll be listening again on that port at
+    ' some point in the near future.
+    ifnot dstport==last_listen_port AND LONG[RTCADDR]<last_listen_time+5 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN)
       reject_tcp
     abort -1
   handle_addr := @sSockets + (sSocketBytes * handle)
@@ -391,6 +394,10 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' set socket state, waiting for establish
     LONG[handle_addr + sAge] := long[RTCADDR]
     BYTE[handle_addr + sConState] := SSYNSENT
+
+    ' Little hack
+    last_listen_port:=dstport
+    last_listen_time:=long[RTCADDR]
    
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     ' Reply to FIN with ACK
@@ -686,10 +693,6 @@ PUB listen(port) | handle, handle_addr, x
   BYTE[handle_addr + sConState] := SLISTEN
 
   socketunlock
-
-  ' Little hack
-  last_listen_port:=port
-  last_listen_time:=long[RTCADDR]
   
   return handle 
 

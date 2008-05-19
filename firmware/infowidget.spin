@@ -20,7 +20,7 @@ OBJ
   subsys        : "subsys"
   settings      : "settings"
   http          : "http"
-  base64        : "base64"
+  auth          : "auth_basic"
   tel           : "api_telnet_serial"
                                      
 VAR
@@ -361,10 +361,11 @@ HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 
 
 
-pri httpUnauthorized
+pri httpUnauthorized(authorized)
   websocket.str(@HTTP_401)
   websocket.str(@HTTP_CONNECTION_CLOSE)
-  websocket.txMimeHeader(string("WWW-Authenticate"),string("Basic realm='ybox2'"))
+  auth.generateChallenge(@buffer,127,authorized)
+  websocket.txMimeHeader(string("WWW-Authenticate"),@buffer)
   websocket.str(@CR_LF)
   websocket.str(@HTTP_401)
 
@@ -445,16 +446,7 @@ pub httpServer | i, contentLength,authorized
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
         contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        ' Skip past the word "Basic"
-        repeat i from 0 to 7
-          if buffer[i]==" "
-            i++
-            quit
-          if buffer[i]==0
-            quit
-        base64.inplaceDecode(@buffer+i)  
-        settings.getString(settings#MISC_PASSWORD,@buffer2,127)
-        authorized:=strcomp(@buffer+i,@buffer2)
+        authorized:=auth.authenticateResponse(@buffer)
 
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
@@ -531,8 +523,9 @@ pub httpServer | i, contentLength,authorized
         websocket.str(string("</body></html>",13,10))
         
       elseif strcomp(@httpPath,string("/config"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
+          websocket.close
           next
 
         if http.getFieldFromQuery(@httpQuery,string("SH"),@buffer,127)
@@ -555,8 +548,9 @@ pub httpServer | i, contentLength,authorized
         websocket.str(string("OK",13,10))
 
       elseif strcomp(@httpPath,string("/reboot"))
-        ifnot authorized
-          httpUnauthorized
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
+          websocket.close
           next
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
