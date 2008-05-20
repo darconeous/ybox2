@@ -191,7 +191,7 @@ pub httpServer | char, i, contentLength,authorized
       if strcomp(@httpHeader,string("Content-Length"))
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        authorized:=auth.authenticateResponse(@buffer)
+        authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
                
     if strcomp(@httpMethod,string("GET"))
       hits++

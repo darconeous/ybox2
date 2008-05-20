@@ -15,7 +15,7 @@ CON
 DAT
 type byte "Basic"
 
-pub authenticateResponse(str) | i,buffer[20]
+pub authenticateResponse(str,method,uriPath) | i,buffer[20]
   ' Skip past the word "Basic"
   repeat i from 0 to 4
     if byte[str][i]<>type[i]

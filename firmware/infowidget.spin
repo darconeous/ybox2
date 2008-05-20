@@ -248,24 +248,25 @@ PUB main
 
 pub WeatherCog | retrydelay,port,err
   port := 20000
+  retrydelay := 1000 ' Reset the retry delay
 
   repeat
     subsys.StatusLoading
     if (err:=\WeatherUpdate(port))
-      retrydelay := 500 ' Reset the retry delay
+      retrydelay := 1000 ' Reset the retry delay
       subsys.StatusIdle
       term.str(string($B,12))    
       term.dec(subsys.RTC) ' Print out the RTC value
       term.out(" ")
       tel.close
-      delay_ms(30000)     ' 30 sec delay
+      delay_ms(30_000)     ' 30 sec delay
     else
       subsys.StatusErrorCode(err)
       stat_errors++
       showMessage(string("Error!"))    
       tel.closeall
       websocket.closeall
-      if retrydelay < 10_000
+      if retrydelay < 60_000
          retrydelay+=retrydelay
       delay_ms(retrydelay)             ' failed to connect     
     if ++port > 30000
@@ -446,7 +447,7 @@ pub httpServer | i, contentLength,authorized
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
         contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        authorized:=auth.authenticateResponse(@buffer)
+        authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
 
              
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))

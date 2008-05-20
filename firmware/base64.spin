@@ -15,8 +15,7 @@ PUB inplaceDecode(in_ptr) | out_ptr,i,in,char,size
     ifnot BYTE[in_ptr]
       quit
     repeat i from 0 to 3
-      char:=BYTE[in_ptr++]
-      'repeat while (char:=BYTE[in_ptr++])==" "
+      repeat while isWhitespace(char:=BYTE[in_ptr++])
       ifnot char
         BYTE[@in][i]:="="
         in_ptr--
@@ -30,7 +29,10 @@ PUB inplaceDecode(in_ptr) | out_ptr,i,in,char,size
   while char AND i==3     
   BYTE[out_ptr]:=0
   return size
-
+PRI isWhitespace(char)
+  case char
+    9..13,32: return TRUE
+    other: return FALSE
 pri base64_tlu(char) | i
   case char
     "A".."Z": return char-"A"

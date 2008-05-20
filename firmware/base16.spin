@@ -1,82 +1,65 @@
 {{
-  MD5 Hash in Spin
-  Written by Robert Quattlebaum <darco@deepdarc.com>
-  Adapted from pseudo code from http://en.wikipedia.org/wiki/MD5.
+** Base16 decoding/encoding functions v0.1
+** by Robert Quattlebaum <darco@deepdarc.com>
+** PUBLIC DOMAIN
+** 2008-05-19
+**
+** NOT YET STABLE OR FULLY TESTED.
+**
 }}
-CON { Public Constants }
-  HASH_LENGTH = 16 ' An MD5 hash is 16 bytes long
-  BLOCK_LENGTH = 64 ' Block length is 64 bytes  
-DAT { Tables }
-
-k       long  $D76AA478, $E8C7B756, $242070DB, $C1BDCEEE, $F57C0FAF, $4787C62A, $A8304613, $FD469501
-        long  $698098D8, $8B44F7AF, $FFFF5BB1, $895CD7BE, $6B901122, $FD987193, $A679438E, $49B40821
-        long  $F61E2562, $C040B340, $265E5A51, $E9B6C7AA, $D62F105D, $02441453, $D8A1E681, $E7D3FBC8
-        long  $21E1CDE6, $C33707D6, $F4D50D87, $455A14ED, $A9E3E905, $FCEFA3F8, $676F02D9, $8D2A4C8A
-        long  $FFFA3942, $8771F681, $6D9D6122, $FDE5380C, $A4BEEA44, $4BDECFA9, $F6BB4B60, $BEBFBC70
-        long  $289B7EC6, $EAA127FA, $D4EF3085, $04881D05, $D9D4D039, $E6DB99E5, $1FA27CF8, $C4AC5665
-        long  $F4292244, $432AFF97, $AB9423A7, $FC93A039, $655B59C3, $8F0CCC92, $FFEFF47D, $85845DD1
-        long  $6FA87E4F, $FE2CE6E0, $A3014314, $4E0811A1, $F7537E82, $BD3AF235, $2AD7D2BB, $EB86D391
-         
-r       byte  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22
-        byte  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20
-        byte  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23
-        byte  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21
-
-initial_hash long $67452301, $EFCDAB89, $98BADCFE, $10325476
-
-hash_name byte "md5",0
-
-PUB hash(dataptr,datalen,h)
-  hashstart(h)
-  hashfinish(dataptr,datalen,datalen,h)
-  
-PUB hashStart(h)
-  longmove(h,@initial_hash,constant(HASH_LENGTH/4))
-  
-PUB hashBlock(dataptr,h)|i,a,b,c,d,f,g,tmp
-  longmove(@a,h,constant(HASH_LENGTH/4))
-  repeat i from 0 to 63
-    case i
-      0 .. 15:
-        f := (b & c) | ((! b) & d)
-        g := i
-      16 .. 31:
-        f := (d & b) | ((! d) & c)
-        g := (5*i + 1) & 15
-      32 .. 47:
-        f := b ^ c ^ d
-        g := (3*i + 5) & 15
-      48 .. 63:
-        f := c ^ (b | (! d))
-        g := (7*i) & 15
-
-    tmp := d
-    d := c
-    c := b
-    b += (a + f + k[i] + LONG[dataptr][g]) <- r[i]
-    a := tmp
+PUB inplaceDecode(in_ptr)
+{{ Decodes a base16 encoded string in-place. Returns the size of the decoded data. }}
+  return decode(in_ptr,in_ptr,1000000)
+PUB decode(out_ptr,in_ptr,len)|i,in,char,size
+  size:=0
+  ifnot in_ptr
+    return 0
+  repeat
+    ifnot BYTE[in_ptr]
+      quit
+    in:=0
+    repeat i from 0 to 1
+      repeat while isWhitespace(char:=BYTE[in_ptr++])
+      ifnot char
+        quit
+      BYTE[@in][i]:=char
      
-  LONG[h][0]+=a
-  LONG[h][1]+=b
-  LONG[h][2]+=c
-  LONG[h][3]+=d
-         
-PUB hashFinish(dataptr,datalen,totallen,h)|a[BLOCK_LENGTH/4]
-  repeat while datalen => BLOCK_LENGTH
-    hashBlock(dataptr,h)
-    datalen-=BLOCK_LENGTH
-    dataptr+=BLOCK_LENGTH
-  longfill(@a,0,constant(BLOCK_LENGTH/4))
-  bytemove(@a,dataptr,datalen)
-  BYTE[@a][datalen]:=$80
-  if datalen>BLOCK_LENGTH-9
-    hashBlock(@a,h)     
-    longfill(@a,0,constant(BLOCK_LENGTH/4))
-  LONG[@a][14]:=totallen*8
-  hashBlock(@a,h)     
-  longfill(@a,0,constant(BLOCK_LENGTH/4))
-PUB hashName
-  return hash_name
+    if (i:=base16_decode_byte(in))=>0
+      BYTE[out_ptr++]:=i
+      size++
+  while char AND i=>0     
+  BYTE[out_ptr]:=0
+  return size
+
+PUB encode(out_ptr,in_ptr,len)|val
+  repeat while len--
+    val:=dec_to_base16(BYTE[in_ptr++])
+    BYTE[out_ptr++]:=BYTE[@val][0]
+    BYTE[out_ptr++]:=BYTE[@val][1]
+  BYTE[out_ptr]:=0
+  return out_ptr
+  
+PRI isWhitespace(char)
+  case char
+    9..13,32: return TRUE
+    other: return FALSE
+PRI base16_to_dec(char) | i
+  case char
+    "0".."9": return char-"0"
+    "a".."f": return char-"a"+10
+    "A".."F": return char-"A"+10
+    other: return -1
+PRI dec_to_base16(dec) | i
+  dec&=%1111
+  if dec < 10
+    return dec+"0"
+  return dec+"a"
+PRI base16_decode_byte(in)
+  return base16_to_dec(BYTE[@in][0])<<4+base16_to_dec(BYTE[@in][1])
+PRI base16_encode_byte(in):out
+  byte[@out][0]:=dec_to_base16(in>>4)
+  byte[@out][1]:=dec_to_base16(in)
+
 CON
 {{
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

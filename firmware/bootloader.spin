@@ -391,7 +391,7 @@ pub httpServer | i,j,contentLength,authorized,stale
       if strcomp(@httpHeader,@HTTP_HEADER_CONTENT_LENGTH)
         contentLength:=atoi(@buffer)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
-        authorized:=auth.authenticateResponse(@buffer)
+        authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
         
     ' Authorization check
     ' You can comment this out if you want to
