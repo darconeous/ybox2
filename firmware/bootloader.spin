@@ -18,9 +18,10 @@
 	IP address from the screen and type that into a web browser.
 	
 	If you have a PAL TV, you will need to switch to PAL mode. Simply press
-	and hold the button on the board until you hear a chirp. At this point
-	the bootloader has toggled the video mode. You only have to do this once,
-	your setting will be remembered. 
+	and hold the button while the bootloader is idle ("rainbow" colored LED)
+	until you hear a chirp. At this point the bootloader has toggled the
+	video mode. You only have to do this once, your setting will be
+	remembered across reboots.
 
 	From the bootloader configuration page you can do things like set
 	a password, enable/disable auto-boot, reboot, boot into stage 2,
@@ -35,7 +36,7 @@
 	(important!), and then pressing "save binary file".
 
 	To upload the file to the ybox2, you need to preform a HTTP PUT on
-	<http://[ip-address]/stage2.eeprom>.
+	<http://[IPADDRESS]/stage2.eeprom>.
 
 	If you are having a hard time finding a way to do a HTTP PUT, I would
 	recommend using cURL. <http://curl.haxx.se/>
@@ -59,7 +60,6 @@
 	To boot into stage two with curl, you can use the following:
 
 	curl http://[IPADDRESS]/stage2
-
 
 	QUICK REFERENCE
 
@@ -1087,6 +1087,7 @@ PRI delay_ms(Duration)
 DAT
         org
 ' Taken from the propeller booter code, supplied by Parallax.
+' All of the code after this point is copyrighted by Parallax.
 
 ' Load ram from eeprom and launch
 '
