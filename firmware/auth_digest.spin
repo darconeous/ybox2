@@ -2,38 +2,50 @@
   MD5-Digest HTTP authentication object
   By Robert Quattlebaum <darco@deepdarc.com>
 
-  Work in progress. Doesn't work yet.
+  Work in progress.
 }}
 obj
   settings : "settings"
-  base64 : "base64"
   base16 : "base16"
   hasher : "md5"
 CON
   STAT_UNAUTH =  FALSE
   STAT_STALE =   $80
   STAT_AUTH =    TRUE
-
-  NONCE_LENGTH = 8 'In bytes
+  HASH_LENGTH =  16' hasher#HASH_LENGTH
+  NONCE_LENGTH = 4 'In bytes
+  RTCADDR = $7A00
 DAT
 type byte "Digest",0
 realm byte "ybox2",0
 
-hash_value    long 0[hasher#HASH_LENGTH]
+hash_value    long 0[hasher#HASH_LENGTH/4]
 hash_buffer   byte 0[hasher#BLOCK_LENGTH]
 hash_size     long 0
 
+nonce_offset  LONG $242070DB
 pri hash_init
   hasher.hashStart(@hash_value)
-  hash_buffer_size:=0
+  hash_size:=0
+pri hash_append_byte(char)
+  hash_buffer[hash_size++ & constant(hasher#BLOCK_LENGTH-1)]:=char
+  if hash_size & constant(hasher#BLOCK_LENGTH-1) == 0
+    hasher.hashBlock(@hash_buffer,@hash_value)
 pri hash_append(ptr,len)
-pri hash_finish(ptr,len)
-'  hasher.hashFinish(dataptr,datalen,totallen,h)
+  repeat while len--
+    hash_append_byte(BYTE[ptr++])
+pri hash_append_base16(ptr,len)
+  repeat while len--
+    hash_append_byte(base16.dec_to_base16(BYTE[ptr]>>4))
+    hash_append_byte(base16.dec_to_base16(BYTE[ptr++]))
+pri hash_finish
+  hasher.hashFinish(@hash_buffer,hash_size & constant(hasher#BLOCK_LENGTH-1),hash_size,@hash_value)
 
 pri generateNonce(ptr)
   bytefill(ptr,0,NONCE_LENGTH)
+  LONG[ptr][0]:=nonce_offset+LONG[RTCADDR]
 pri isValidNonce(ptr)
-  return TRUE
+  return (LONG[ptr][0]-nonce_offset>LONG[RTCADDR]-60) AND (LONG[ptr][0]-nonce_offset=<LONG[RTCADDR])
 pri getFieldWithKey(packeddataptr,keystring) | i,char
   i:=0
   repeat while BYTE[packeddataptr]
@@ -58,7 +70,7 @@ pri getFieldWithKey(packeddataptr,keystring) | i,char
       i++  
   return 0
 
-pub authenticateResponse(str,method,uriPath) | i,H1[hasher#HASH_LENGTH/4],H2[hasher#HASH_LENGTH/4],response[hasher#HASH_LENGTH/4],nonce[NONCE_LENGTH/4],buffer[20]
+pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGTH/4],response[HASH_LENGTH/4],nonce[NONCE_LENGTH/4],buffer[20]
   ' Skip past the word "Digest"
   repeat i from 0 to 5
     if byte[str][i]<>type[i]
@@ -69,33 +81,71 @@ pub authenticateResponse(str,method,uriPath) | i,H1[hasher#HASH_LENGTH/4],H2[has
 
   ifnot isValidNonce(@nonce)
     return STAT_STALE
-    
-  'base16.decode(@response,getFieldWithKey(str,string("response")),hasher#HASH_LENGTH)
+
+  ' Calculate H1
+  hash_init
+  hash_append(string("admin:"),6)
+  hash_append(@realm,strsize(@realm))
+  hash_append_byte(":")  
+  i:=settings.getData(settings#MISC_PASSWORD,@buffer,40)
+  hash_append(@buffer,i)
+  hash_finish
+  bytemove(@H1,@hash_value,hasher#HASH_LENGTH)
+
+  ' Calculate H2
+  hash_init
+  hash_append(method,strsize(method))
+  hash_append_byte(":")  
+  hash_append(uriPath,strsize(uriPath))
+  hash_finish
+  bytemove(@H2,@hash_value,hasher#HASH_LENGTH)
   
+  ' Calculate Response
+  hash_init
+  hash_append_base16(@h1,hasher#HASH_LENGTH)
+  hash_append_byte(":")  
+  hash_append_base16(@nonce,NONCE_LENGTH)
+  hash_append_byte(":")  
+  hash_append_base16(@h2,hasher#HASH_LENGTH)
+  hash_finish
+  bytemove(@response,@hash_value,hasher#HASH_LENGTH)
   
-  return STAT_UNAUTH
+  ' Verify response
+  base16.decode(@buffer,getFieldWithKey(str,string("response")),hasher#HASH_LENGTH)
+  repeat i from 0 to constant(hasher#HASH_LENGTH/4-1)
+    if buffer[i] <> response[i]
+      return STAT_UNAUTH
+  
+  return STAT_AUTH
      
 pub generateChallenge(dest,len,authstate)|nonce[NONCE_LENGTH/4]
-  bytemove(dest,type,strlen(type))
-  len-=strlen(type)
-  dest+=strlen(type)
+  bytemove(dest,@type,strsize(type))
+  len-=strsize(@type)
+  dest+=strsize(@type)
   byte[dest++][0]:=" "
   len--
+
+  if authstate==STAT_STALE
+    bytemove(dest,string("stale=true, "),12)
+    dest+=12
+    len-=12
+
   bytemove(dest,string("realm=",34),7)
   dest+=7
   len-=7
-  bytemove(dest,realm,strlen(realm))
-  len-=strlen(realm)
-  dest+=strlen(realm)
-
+  bytemove(dest,@realm,strsize(@realm))
+  len-=strsize(@realm)
+  dest+=strsize(@realm)
+    
   bytemove(dest,string(34,", nonce=",34),10)
   dest+=10
   len-=10
-  base16.encode(dest,@nonce,len)
-  dest+=NONCE_LENGTH/2
-  len-=NONCE_LENGTH/2
+  generateNonce(@nonce)
+  base16.encode(dest,@nonce,NONCE_LENGTH)
+  dest+=NONCE_LENGTH*2
+  len-=NONCE_LENGTH*2
   
-  byte[dest++][0]:=" "
+  byte[dest++][0]:=34
   len--
 
   byte[dest++][0]:=0

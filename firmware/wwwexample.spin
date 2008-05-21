@@ -15,7 +15,7 @@ OBJ
   socket        : "api_telnet_serial"
   http          : "http"
   base64        : "base64"
-  auth          : "auth_basic"                                   
+  auth          : "auth_digest"                                   
 VAR
   long stack[100] 
   byte stage_two

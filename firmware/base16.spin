@@ -33,7 +33,7 @@ PUB decode(out_ptr,in_ptr,len)|i,in,char,size
 
 PUB encode(out_ptr,in_ptr,len)|val
   repeat while len--
-    val:=dec_to_base16(BYTE[in_ptr++])
+    val:=base16_encode_byte(BYTE[in_ptr++])
     BYTE[out_ptr++]:=BYTE[@val][0]
     BYTE[out_ptr++]:=BYTE[@val][1]
   BYTE[out_ptr]:=0
@@ -43,17 +43,17 @@ PRI isWhitespace(char)
   case char
     9..13,32: return TRUE
     other: return FALSE
-PRI base16_to_dec(char) | i
+PUB base16_to_dec(char) | i
   case char
     "0".."9": return char-"0"
     "a".."f": return char-"a"+10
     "A".."F": return char-"A"+10
     other: return -1
-PRI dec_to_base16(dec) | i
+PUB dec_to_base16(dec) | i
   dec&=%1111
   if dec < 10
     return dec+"0"
-  return dec+"a"
+  return dec+"a"-10
 PRI base16_decode_byte(in)
   return base16_to_dec(BYTE[@in][0])<<4+base16_to_dec(BYTE[@in][1])
 PRI base16_encode_byte(in):out

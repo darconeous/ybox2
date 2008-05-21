@@ -24,7 +24,7 @@ r       byte  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22
 
 initial_hash long $67452301, $EFCDAB89, $98BADCFE, $10325476
 
-hash_name byte "md5",0
+hash_name byte "MD5",0
 
 PUB hash(dataptr,datalen,h)
   hashstart(h)
