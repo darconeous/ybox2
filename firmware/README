@@ -1,0 +1,12 @@
+This folder contains the firmware sources for the ybox2.
+
+The following programs are included:
+
+ * bootloader.spin
+ * infowidget.spin
+ * wwwexample.spin
+
+Documentation for each is included in the source file.
+
+I don't recommend mucking with the bootloader unless you have a prop-plug.
+

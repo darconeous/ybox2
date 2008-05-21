@@ -4,7 +4,87 @@
 
         Designed for use with a 64KB EEPROM. It will not work
         properly with a 32KB EEPROM.
-                               
+
+	INSTRUCTIONS
+
+	The first time the bootloader runs it will generate a random MAC
+	address and UUID, and will then store these with the settings object.
+	These values will be remembered thereafter, and should never change.
+
+	When the device normally boots, it will start looking for a DHCP
+	server. While it is doing this, it will pulse blue. Once it gets
+	assigned an IP address, it will make a chirp and the LED will go
+	to its idle "rainbow" state. At this point you can read off the
+	IP address from the screen and type that into a web browser.
+	
+	If you have a PAL TV, you will need to switch to PAL mode. Simply press
+	and hold the button on the board until you hear a chirp. At this point
+	the bootloader has toggled the video mode. You only have to do this once,
+	your setting will be remembered. 
+
+	From the bootloader configuration page you can do things like set
+	a password, enable/disable auto-boot, reboot, boot into stage 2,
+	enter IR test mode, etc. You can also download previously uploaded
+	firmware, configuration settings, etc.
+
+	UPLOADING STAGE2 FIRMWARE
+
+	To upload a new program to be bootloaded (called "stage 2"), you first
+	need to make a binary of the program. You can make the binary file by
+	pressing F8 in the propeller tool, waiting for the program to compile
+	(important!), and then pressing "save binary file".
+
+	To upload the file to the ybox2, you need to preform a HTTP PUT on
+	<http://[ip-address]/stage2.eeprom>.
+
+	If you are having a hard time finding a way to do a HTTP PUT, I would
+	recommend using cURL. <http://curl.haxx.se/>
+
+	The following command, for example, will write the wwwexample.binary image:
+
+	curl http://[IPADDRESS]/stage2.eeprom -T wwwexample.binary
+
+	If you want the unit to immediately boot into stage2, simply add ?boot to
+	the URL:
+
+	curl http://[IPADDRESS]/stage2.eeprom?boot -T wwwexample.binary
+
+	If you have set up a password, the command line is slightly different:
+
+	curl --anyauth http://admin:PASSWORD@[IPADDRESS]/stage2.eeprom -T wwwexample.binary
+
+	After uploading, the ybox2 will return an MD5 hash of the uploaded eeprom, followed
+	by the word "OK".
+
+	To boot into stage two with curl, you can use the following:
+
+	curl http://[IPADDRESS]/stage2
+
+
+	QUICK REFERENCE
+
+	TO RESET: Hold down the button while booting. Keep holding it
+		down until the system reboots. You will hear a lot of warning chirps,
+		but make sure you hold down the button until it reboots! After it reboots
+		let go. Your ybox2 has been reset. This will erase every setting except
+		for the MAC address, UUID, and LED configuration. If you forget the
+		password, this is what you need to do.
+	
+	TO BYPASS AUTOBOOT: Hold down the button while booting until you hear a single
+		"groan" and the screen displays "Autoboot aborted.". At this point,
+		the ybox2 will boot as if autoboot were disabled. This only applies
+		to the current boot. DON'T HOLD DOWN THE BUTTON TOO LONG, OR ELSE THE
+		UNIT WILL RESET.
+	
+	TO BOOT INTO STAGE2: When the bootloader is 'idle' (rainbow-colored LED), press
+		and release the button. Don't hold the button down, or else you will
+		toggle the video mode!
+
+	TO TOGGLE NTSC/PAL: When the bootloader is 'idle' (rainbow-colored LED), press
+		and hold the button until you hear a chirp---then let go.
+
+
+	                               
 }}
 CON
 
