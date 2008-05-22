@@ -9,6 +9,8 @@ obj
   base16 : "base16"
   hasher : "MD5"
 CON
+  NONCE_TIMEOUT = 30 ' In Seconds
+CON
   STAT_UNAUTH =  FALSE
   STAT_STALE =   $80
   STAT_AUTH =    TRUE
@@ -24,6 +26,10 @@ hash_buffer   byte 0[hasher#BLOCK_LENGTH]
 
 hash_size     long 0
 nonce_offset  LONG $242070DB
+pub init(x)
+  if x
+    nonce_offset:=x
+
 pri hash_init
   hasher.hashStart(@hash_value)
   hash_size:=0
@@ -43,9 +49,20 @@ pri hash_finish
 
 pri generateNonce(ptr)
   bytefill(ptr,0,NONCE_LENGTH)
-  LONG[ptr][0]:=nonce_offset+LONG[RTCADDR]
-pri isValidNonce(ptr)
-  return (LONG[ptr][0]-nonce_offset>LONG[RTCADDR]-60) AND (LONG[ptr][0]-nonce_offset=<LONG[RTCADDR])
+  ' Add a timestamp, offset by a somewhat random amount.
+  LONG[ptr][0]:=LONG[RTCADDR]+nonce_offset
+  ' Scramble!
+  LONG[ptr][0]?
+
+pri isValidNonce(ptr)|tstamp
+  tstamp:=LONG[ptr][0]
+
+  ' Descramble!
+  ?tstamp
+
+  tstamp-=nonce_offset
+  return (tstamp+NONCE_TIMEOUT>LONG[RTCADDR]) AND (tstamp=<LONG[RTCADDR])
+
 pri getFieldWithKey(packeddataptr,keystring) | i,char
   i:=0
   repeat while BYTE[packeddataptr]
@@ -76,10 +93,9 @@ pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGT
     if byte[str][i]<>type[i]
       return STAT_UNAUTH
   str+=i+1
-
-  base16.decode(@nonce,getFieldWithKey(str,string("nonce")),NONCE_LENGTH)
-
-  ifnot isValidNonce(@nonce)
+  
+  ' Make sure the nonce is valid
+  ifnot (base16.decode(@nonce,getFieldWithKey(str,string("nonce")),NONCE_LENGTH) == NONCE_LENGTH) AND isValidNonce(@nonce)
     return STAT_STALE
 
   ' Calculate H1

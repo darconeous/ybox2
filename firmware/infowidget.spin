@@ -22,6 +22,7 @@ OBJ
   http          : "http"
   auth          : "auth_digest"
   tel           : "api_telnet_serial"
+  random        : "RealRandom"
                                      
 VAR
   byte path_holder[128]
@@ -70,6 +71,11 @@ PUB init | i
   term.out(0)
 
   subsys.StatusLoading
+
+  ' Init the auth object with some randomness
+  random.start
+  auth.init(random.random)
+  random.stop
 
   if settings.findKey(settings#MISC_STAGE2)
     settings.removeKey(settings#MISC_STAGE2)
@@ -336,8 +342,7 @@ PRI delay_ms(Duration)
   
 VAR
   byte httpMethod[8]
-  byte httpPath[64]
-  byte httpQuery[64]
+  byte httpPath[128]
   byte httpHeader[32]
   byte buffer[128]
   byte buffer2[128]
@@ -439,7 +444,7 @@ pub httpServer | i, contentLength,authorized,queryPtr
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
     contentLength:=0
 
-    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,$8000)<0
       websocket.close
       next
         
@@ -500,15 +505,15 @@ pub httpServer | i, contentLength,authorized,queryPtr
         websocket.str(string("</tt></div>"))
 
         websocket.str(string("<h2>Settings</h2>"))
-        websocket.str(string("<form action='\config' method='PUT'>"))
-        settings.getString(settings#SERVER_HOST,@httpQuery,32)
-        addTextField(string("SH"),string("Server Host"),@httpQuery,32)
-        settings.getString(settings#SERVER_Path,@httpQuery,32)
-        addTextField(string("SP"),string("Server Path"),@httpQuery,32)
+        websocket.str(string("<form action='\config' method='POST'>"))
+        settings.getString(settings#SERVER_HOST,@httpPath,32)
+        addTextField(string("SH"),string("Server Host"),@httpPath,32)
+        settings.getString(settings#SERVER_Path,@httpPath,32)
+        addTextField(string("SP"),string("Server Path"),@httpPath,32)
 
         websocket.str(string("<label for='SA'>Server Address</label><br /><input name='SA' id='SA' size='32' value='"))
-        settings.getData(settings#SERVER_IPv4_ADDR,@httpQuery,32)
-        websocket.txip(@httpQuery)
+        settings.getData(settings#SERVER_IPv4_ADDR,@httpPath,32)
+        websocket.txip(@httpPath)
         websocket.str(string("' /><br />"))
 
         websocket.str(string("<input name='submit' type='submit' />"))
@@ -530,6 +535,14 @@ pub httpServer | i, contentLength,authorized,queryPtr
           websocket.close
           next
 
+        if contentLength
+          i:=0
+          repeat while contentLength AND i<127
+            httpPath[i++]:=websocket.rxtime(1000)
+            contentLength--
+          httpPath[i]~
+          queryPtr:=@httpPath
+          
         if http.getFieldFromQuery(queryPtr,string("SH"),@buffer,127)
           settings.setString(settings#SERVER_HOST,@buffer)  
         if http.getFieldFromQuery(queryPtr,string("SP"),@buffer,127)

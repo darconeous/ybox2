@@ -170,6 +170,11 @@ PUB init | i, tv_mode
       delay_ms(2000)
     reboot
 
+  ' Init the auth object with some randomness
+  random.start
+  auth.init(random.random)
+  random.stop
+
   ' Print out the MAC address on the TV
   if settings.getData(settings#NET_MAC_ADDR,@stack,6)
     term.str(string("MAC: "))
@@ -244,7 +249,7 @@ PUB init | i, tv_mode
     term.str(string("BOOTLOADER UPGRADE",13,"STAGE TWO",13))
   else
     subsys.StatusIdle
-
+  
   ' Make a happy noise, we are moving along!
   subsys.chirpHappy
 

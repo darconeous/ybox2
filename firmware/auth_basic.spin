@@ -14,7 +14,8 @@ CON
   STAT_AUTH =    TRUE
 DAT
 type byte "Basic"
-
+pub init(random)
+{{ Placeholder. Doesn't do anything for basic authentication. }}
 pub authenticateResponse(str,method,uriPath) | i,buffer[20]
   ' Skip past the word "Basic"
   repeat i from 0 to 4

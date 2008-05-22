@@ -109,7 +109,7 @@ pub parseRequest(handle,method,path,query) | i,char
       i++
     BYTE[method][i]:=0
     i:=0
-    repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
+    repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<127
       BYTE[path][i]:=char
       if char == " " OR char == "#" ' OR char == "?" 
         quit
