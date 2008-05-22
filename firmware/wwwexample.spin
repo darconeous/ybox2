@@ -166,7 +166,7 @@ pri httpUnauthorized(authorized)
   socket.str(@CR_LF)
   socket.str(@HTTP_401)
 
-pub httpServer | char, i, contentLength,authorized
+pub httpServer | char, i, contentLength,authorized,queryPtr
 
   repeat
     repeat while \socket.listen(80) == -1
@@ -193,6 +193,7 @@ pub httpServer | char, i, contentLength,authorized
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
         authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
                
+    queryPtr:=http.splitPathAndQuery(@httpPath)         
     if strcomp(@httpMethod,string("GET"))
       hits++
       if strcomp(@httpPath,string("/"))
@@ -250,7 +251,7 @@ pub httpServer | char, i, contentLength,authorized
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         httpQuery[6]:=0
-        i:=numbers.FromStr(@httpQuery,numbers#HEX)
+        i:=numbers.FromStr(queryPtr,numbers#HEX)
         subsys.fadeToColor(byte[@i][2],byte[@i][1],byte[@i][0],1000)
         socket.hex(byte[@i][2],2)
         socket.hex(byte[@i][1],2)
@@ -261,7 +262,7 @@ pub httpServer | char, i, contentLength,authorized
         socket.str(string("Location: /",13,10))
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
-        http.unescapeURLInPlace(@httpQuery)
+        http.unescapeURLInPlace(queryPtr)
         term.str(@httpQuery)
         term.out(13)
         socket.str(string(" OK",13,10))

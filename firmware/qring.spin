@@ -141,4 +141,3 @@ PUB isEmpty(i)
     return TRUE
   i--
   return readpoint[i]==writepoint[i]
-

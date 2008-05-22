@@ -7,7 +7,7 @@
 obj
   settings : "settings"
   base16 : "base16"
-  hasher : "md5"
+  hasher : "MD5"
 CON
   STAT_UNAUTH =  FALSE
   STAT_STALE =   $80
@@ -21,8 +21,8 @@ realm byte "ybox2",0
 
 hash_value    long 0[hasher#HASH_LENGTH/4]
 hash_buffer   byte 0[hasher#BLOCK_LENGTH]
-hash_size     long 0
 
+hash_size     long 0
 nonce_offset  LONG $242070DB
 pri hash_init
   hasher.hashStart(@hash_value)
@@ -119,7 +119,7 @@ pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGT
   return STAT_AUTH
      
 pub generateChallenge(dest,len,authstate)|nonce[NONCE_LENGTH/4]
-  bytemove(dest,@type,strsize(type))
+  bytemove(dest,@type,strsize(@type))
   len-=strsize(@type)
   dest+=strsize(@type)
   byte[dest++][0]:=" "

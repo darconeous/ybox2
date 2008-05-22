@@ -5,86 +5,86 @@
         Designed for use with a 64KB EEPROM. It will not work
         properly with a 32KB EEPROM.
 
-	INSTRUCTIONS
+        INSTRUCTIONS
 
-	The first time the bootloader runs it will generate a random MAC
-	address and UUID, and will then store these with the settings object.
-	These values will be remembered thereafter, and should never change.
+        The first time the bootloader runs it will generate a random MAC
+        address and UUID, and will then store these with the settings object.
+        These values will be remembered thereafter, and should never change.
 
-	When the device normally boots, it will start looking for a DHCP
-	server. While it is doing this, it will pulse blue. Once it gets
-	assigned an IP address, it will make a chirp and the LED will go
-	to its idle "rainbow" state. At this point you can read off the
-	IP address from the screen and type that into a web browser.
-	
-	If you have a PAL TV, you will need to switch to PAL mode. Simply press
-	and hold the button while the bootloader is idle ("rainbow" colored LED)
-	until you hear a chirp. At this point the bootloader has toggled the
-	video mode. You only have to do this once, your setting will be
-	remembered across reboots.
+        When the device normally boots, it will start looking for a DHCP
+        server. While it is doing this, it will pulse blue. Once it gets
+        assigned an IP address, it will make a chirp and the LED will go
+        to its idle "rainbow" state. At this point you can read off the
+        IP address from the screen and type that into a web browser.
+        
+        If you have a PAL TV, you will need to switch to PAL mode. Simply press
+        and hold the button while the bootloader is idle ("rainbow" colored LED)
+        until you hear a chirp. At this point the bootloader has toggled the
+        video mode. You only have to do this once, your setting will be
+        remembered across reboots.
 
-	From the bootloader configuration page you can do things like set
-	a password, enable/disable auto-boot, reboot, boot into stage 2,
-	enter IR test mode, etc. You can also download previously uploaded
-	firmware, configuration settings, etc.
+        From the bootloader configuration page you can do things like set
+        a password, enable/disable auto-boot, reboot, boot into stage 2,
+        enter IR test mode, etc. You can also download previously uploaded
+        firmware, configuration settings, etc.
 
-	UPLOADING STAGE2 FIRMWARE
+        UPLOADING STAGE2 FIRMWARE
 
-	To upload a new program to be bootloaded (called "stage 2"), you first
-	need to make a binary of the program. You can make the binary file by
-	pressing F8 in the propeller tool, waiting for the program to compile
-	(important!), and then pressing "save binary file".
+        To upload a new program to be bootloaded (called "stage 2"), you first
+        need to make a binary of the program. You can make the binary file by
+        pressing F8 in the propeller tool, waiting for the program to compile
+        (important!), and then pressing "save binary file".
 
-	To upload the file to the ybox2, you need to preform a HTTP PUT on
-	<http://[IPADDRESS]/stage2.eeprom>.
+        To upload the file to the ybox2, you need to preform a HTTP PUT on
+        <http://[IPADDRESS]/stage2.eeprom>.
 
-	If you are having a hard time finding a way to do a HTTP PUT, I would
-	recommend using cURL. <http://curl.haxx.se/>
+        If you are having a hard time finding a way to do a HTTP PUT, I would
+        recommend using cURL. <http://curl.haxx.se/>
 
-	The following command, for example, will write the wwwexample.binary image:
+        The following command, for example, will write the wwwexample.binary image:
 
-	curl http://[IPADDRESS]/stage2.eeprom -T wwwexample.binary
+        curl http://[IPADDRESS]/stage2.eeprom -T wwwexample.binary
 
-	If you want the unit to immediately boot into stage2, simply add ?boot to
-	the URL:
+        If you want the unit to immediately boot into stage2, simply add ?boot to
+        the URL:
 
-	curl http://[IPADDRESS]/stage2.eeprom?boot -T wwwexample.binary
+        curl http://[IPADDRESS]/stage2.eeprom?boot -T wwwexample.binary
 
-	If you have set up a password, the command line is slightly different:
+        If you have set up a password, the command line is slightly different:
 
-	curl --anyauth http://admin:PASSWORD@[IPADDRESS]/stage2.eeprom -T wwwexample.binary
+        curl --anyauth http://admin:PASSWORD@[IPADDRESS]/stage2.eeprom -T wwwexample.binary
 
-	After uploading, the ybox2 will return an MD5 hash of the uploaded eeprom, followed
-	by the word "OK".
+        After uploading, the ybox2 will return an MD5 hash of the uploaded eeprom, followed
+        by the word "OK".
 
-	To boot into stage two with curl, you can use the following:
+        To boot into stage two with curl, you can use the following:
 
-	curl http://[IPADDRESS]/stage2
+        curl http://[IPADDRESS]/stage2
 
-	QUICK REFERENCE
+        QUICK REFERENCE
 
-	TO RESET: Hold down the button while booting. Keep holding it
-		down until the system reboots. You will hear a lot of warning chirps,
-		but make sure you hold down the button until it reboots! After it reboots
-		let go. Your ybox2 has been reset. This will erase every setting except
-		for the MAC address, UUID, and LED configuration. If you forget the
-		password, this is what you need to do.
-	
-	TO BYPASS AUTOBOOT: Hold down the button while booting until you hear a single
-		"groan" and the screen displays "Autoboot aborted.". At this point,
-		the ybox2 will boot as if autoboot were disabled. This only applies
-		to the current boot. DON'T HOLD DOWN THE BUTTON TOO LONG, OR ELSE THE
-		UNIT WILL RESET.
-	
-	TO BOOT INTO STAGE2: When the bootloader is 'idle' (rainbow-colored LED), press
-		and release the button. Don't hold the button down, or else you will
-		toggle the video mode!
+        TO RESET: Hold down the button while booting. Keep holding it
+                down until the system reboots. You will hear a lot of warning chirps,
+                but make sure you hold down the button until it reboots! After it reboots
+                let go. Your ybox2 has been reset. This will erase every setting except
+                for the MAC address, UUID, and LED configuration. If you forget the
+                password, this is what you need to do.
+        
+        TO BYPASS AUTOBOOT: Hold down the button while booting until you hear a single
+                "groan" and the screen displays "Autoboot aborted.". At this point,
+                the ybox2 will boot as if autoboot were disabled. This only applies
+                to the current boot. DON'T HOLD DOWN THE BUTTON TOO LONG, OR ELSE THE
+                UNIT WILL RESET.
+        
+        TO BOOT INTO STAGE2: When the bootloader is 'idle' (rainbow-colored LED), press
+                and release the button. Don't hold the button down, or else you will
+                toggle the video mode!
 
-	TO TOGGLE NTSC/PAL: When the bootloader is 'idle' (rainbow-colored LED), press
-		and hold the button until you hear a chirp---then let go.
+        TO TOGGLE NTSC/PAL: When the bootloader is 'idle' (rainbow-colored LED), press
+                and hold the button until you hear a chirp---then let go.
 
 
-	                               
+                                       
 }}
 CON
 
@@ -100,8 +100,8 @@ OBJ
   eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
   http          : "http"
+  auth          : "auth_digest"                                   
   md5           : "MD5"
-  auth          : "auth_basic"                                   
 VAR
   long stage_two
   long stack[10] 
@@ -433,11 +433,11 @@ CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
   
 
-pri httpUnauthorized(authorized)
+pri httpUnauthorized(authorized)|challenge[20]
   websocket.str(@HTTP_401)
   websocket.str(@HTTP_CONNECTION_CLOSE)
-  auth.generateChallenge(@buffer,127,authorized)
-  websocket.txMimeHeader(string("WWW-Authenticate"),@buffer)
+  auth.generateChallenge(@challenge,constant(20*4),authorized)
+  websocket.txMimeHeader(string("WWW-Authenticate"),@challenge)
   websocket.str(@CR_LF)
   websocket.str(@HTTP_401)
 
@@ -448,7 +448,7 @@ pri httpNotFound
   websocket.str(@HTTP_404)
 
      
-pub httpServer | i,j,contentLength,authorized,stale
+pub httpServer | i,j,contentLength,authorized,stale,queryptr
   repeat
     repeat while \websocket.listen(80) < 0
       buttonCheck
@@ -483,7 +483,8 @@ pub httpServer | i,j,contentLength,authorized,stale
     'if authorized<>auth#STAT_AUTH
     '  httpUnauthorized(authorized)
     '  next
-             
+
+    queryPtr:=http.splitPathAndQuery(@httpPath)         
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
         websocket.str(@HTTP_200)
@@ -575,7 +576,7 @@ pub httpServer | i,j,contentLength,authorized,stale
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
-        if httpQuery[0]=="1"
+        if byte[queryPtr][0]=="1"
           settings.setLong(settings#MISC_LED_CONF,$000A0B09)
           settings.commit
           websocket.str(string("ENABLED (NEEDS REBOOT)",13,10))
@@ -592,7 +593,7 @@ pub httpServer | i,j,contentLength,authorized,stale
         websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
-        if httpQuery[0]=="1"
+        if byte[queryPtr][0]=="1"
           settings.setByte(settings#MISC_AUTOBOOT,1)
           settings.commit
           websocket.str(string("ENABLED",13,10))
@@ -686,7 +687,7 @@ pub httpServer | i,j,contentLength,authorized,stale
           websocket.dec(i)         
           websocket.str(@CR_LF)
         else
-          if strcomp(@httpQuery,string("boot")) OR stage_two
+          if strcomp(queryPtr,string("boot")) OR stage_two
             websocket.str(@HTTP_200)
             websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
@@ -812,6 +813,14 @@ pub beginForm(action,method)
   websocket.str(string("'>"))
 pub endForm
   websocket.str(string("</form>"))
+pub addHiddenField(id,value)
+  websocket.str(string("<input type='hidden' name='"))
+  websocket.str(id)
+  websocket.str(string("' id='"))
+  websocket.str(id)
+  websocket.str(string("' value='"))
+  websocket.strxml(value)
+  websocket.str(string("' />"))
 pub addTextField(id,label,value,length)
   websocket.str(string("<div><label for='"))
   websocket.str(id)
@@ -899,7 +908,8 @@ pub indexPage(authorized) | i
      
     if authorized
       beginForm(string("\password"),string("POST"))
-      addTextField(string("username"),string("Username"),string("admin"),32)
+'      addTextField(string("username"),string("Username"),string("admin"),32)
+      addHiddenField(string("username"),string("admin"))
       addPasswordField(string("pwd1"),string("Password"),0,32)
       addPasswordField(string("pwd2"),string("Password"),0,32)
       addSubmitButton 
@@ -1281,4 +1291,3 @@ raddress                res     1
 count                   res     1
 bits                    res     1
 eedata                  res     1
-

@@ -20,7 +20,7 @@ OBJ
   subsys        : "subsys"
   settings      : "settings"
   http          : "http"
-  auth          : "auth_basic"
+  auth          : "auth_digest"
   tel           : "api_telnet_serial"
                                      
 VAR
@@ -422,7 +422,7 @@ pub addTextField(id,label,value,length)
   websocket.strxml(value)
   websocket.str(string("' /></div>"))
 
-pub httpServer | i, contentLength,authorized
+pub httpServer | i, contentLength,authorized,queryPtr
   repeat
     repeat while websocket.listen(80) < 0
       if ina[subsys#BTTNPin]
@@ -450,6 +450,7 @@ pub httpServer | i, contentLength,authorized
         authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
 
              
+    queryPtr:=http.splitPathAndQuery(@httpPath)
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
         websocket.str(@HTTP_200)
@@ -529,12 +530,12 @@ pub httpServer | i, contentLength,authorized
           websocket.close
           next
 
-        if http.getFieldFromQuery(@httpQuery,string("SH"),@buffer,127)
+        if http.getFieldFromQuery(queryPtr,string("SH"),@buffer,127)
           settings.setString(settings#SERVER_HOST,@buffer)  
-        if http.getFieldFromQuery(@httpQuery,string("SP"),@buffer,127)
+        if http.getFieldFromQuery(queryPtr,string("SP"),@buffer,127)
           settings.setString(settings#SERVER_PATH,@buffer)  
 
-        if http.getFieldFromQuery(@httpQuery,string("SA"),@buffer,127)
+        if http.getFieldFromQuery(queryPtr,string("SA"),@buffer,127)
           parseIPStr(@buffer,@buffer2)
           settings.setData(settings#SERVER_IPv4_ADDR,@buffer2,4)  
         

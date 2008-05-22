@@ -26,7 +26,16 @@ pub getFieldFromQuery(packeddataptr,keystring,outvalue,outsize) | i,char
       packeddataptr++
       i++  
   return 0
-
+pub splitPathAndQuery(str)
+{{  Finds the first '?' character, sets it to zero, and
+    returns the pointer of the character just after }}
+  repeat while byte[str]
+    if byte[str]=="?"
+      byte[str]~
+      str++
+      return str
+    str++
+  return str
 pub unescapeURLInPlace(in_ptr) | out_ptr,char,val
   out_ptr:=in_ptr
   repeat while (char:=byte[in_ptr++])
@@ -102,7 +111,7 @@ pub parseRequest(handle,method,path,query) | i,char
     i:=0
     repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<63
       BYTE[path][i]:=char
-      if char == " " OR char == "?"  OR char == "#"
+      if char == " " OR char == "#" ' OR char == "?" 
         quit
       i++
 
