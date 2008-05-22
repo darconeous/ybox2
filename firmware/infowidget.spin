@@ -36,7 +36,9 @@ VAR
 DAT
 productName   BYTE      "ybox2 info widget",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
-  
+
+  info_refresh_period   long    30000  ' in ms
+    
 PUB init | i
   dira[0]:=1 ' Set direction on reset pin
   outa[0]:=0 ' Set state on reset pin to LOW
@@ -252,6 +254,7 @@ PUB main
       subsys.StatusFatalError
 }}    
 
+
 pub WeatherCog | retrydelay,port,err
   port := 20000
   retrydelay := 1000 ' Reset the retry delay
@@ -265,7 +268,7 @@ pub WeatherCog | retrydelay,port,err
       term.dec(subsys.RTC) ' Print out the RTC value
       term.out(" ")
       tel.close
-      delay_ms(30_000)     ' 30 sec delay
+      delay_ms(info_refresh_period)     ' 30 sec delay
     else
       subsys.StatusErrorCode(err)
       stat_errors++
@@ -279,7 +282,7 @@ pub WeatherCog | retrydelay,port,err
       port := 20000
        
 
-pub WeatherUpdate(port) | timeout, addr, gotstart,in,i
+pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
   if settings.getString(settings#SERVER_PATH,@path_holder,64)=<0
     abort 5
    
@@ -309,7 +312,11 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i
     tel.txmimeheader(string("Connection"),string("close"))
     tel.str(@CR_LF)
    
-    repeat while \http.getNextHeader(tel.handle,0,0,0,0)>0
+    repeat while \http.getNextHeader(tel.handle,@header,16,@value,16)>0
+      if strcomp(string("Refresh"),@header)
+        info_refresh_period:=atoi(@value)*1000
+        if info_refresh_period < 4000
+          info_refresh_period:=4000 ' Four second minimum refresh  
         
     timeout := cnt
     i:=0
@@ -486,10 +493,13 @@ pub httpServer | i, contentLength,authorized,queryPtr
         websocket.str(string("</tt></div>"))
         websocket.str(string("<div><tt>Refreshes: "))
         websocket.dec(stat_refreshes)
-        websocket.str(string("</tt></div>"))
+        websocket.str(string("</tt></div>"))        
         websocket.str(string("<div><tt>Errors: "))
         websocket.dec(stat_errors)
         websocket.str(string("</tt></div>"))
+        websocket.str(string("<div><tt>Refresh Period: "))
+        websocket.dec(info_refresh_period)
+        websocket.str(string("ms</tt></div>"))
         websocket.str(string("<div><tt>INA: "))
         repeat i from 0 to 7
           websocket.dec(ina[i])
