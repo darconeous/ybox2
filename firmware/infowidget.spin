@@ -37,7 +37,7 @@ DAT
 productName   BYTE      "ybox2 info widget",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 
-  info_refresh_period   long    30000  ' in ms
+  info_refresh_period   long    30  ' in seconds
     
 PUB init | i
   dira[0]:=1 ' Set direction on reset pin
@@ -257,27 +257,27 @@ PUB main
 
 pub WeatherCog | retrydelay,port,err
   port := 20000
-  retrydelay := 1000 ' Reset the retry delay
+  retrydelay := 1 ' Reset the retry delay
 
   repeat
     subsys.StatusLoading
     if (err:=\WeatherUpdate(port))
-      retrydelay := 1000 ' Reset the retry delay
+      retrydelay := 1 ' Reset the retry delay
       subsys.StatusIdle
       term.str(string($B,12))    
       term.dec(subsys.RTC) ' Print out the RTC value
       term.out(" ")
       tel.close
-      delay_ms(info_refresh_period)     ' 30 sec delay
+      delay_s(info_refresh_period)     ' 30 sec delay
     else
       subsys.StatusErrorCode(err)
       stat_errors++
       showMessage(string("Error!"))    
       tel.closeall
       websocket.closeall
-      if retrydelay < 60_000
+      if retrydelay < 60
          retrydelay+=retrydelay
-      delay_ms(retrydelay)             ' failed to connect     
+      delay_s(retrydelay)             ' failed to connect     
     if ++port > 30000
       port := 20000
        
@@ -314,9 +314,9 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
    
     repeat while \http.getNextHeader(tel.handle,@header,16,@value,16)>0
       if strcomp(string("Refresh"),@header)
-        info_refresh_period:=atoi(@value)*1000
-        if info_refresh_period < 4000
-          info_refresh_period:=4000 ' Four second minimum refresh  
+        info_refresh_period:=atoi(@value)
+        if info_refresh_period < 4
+          info_refresh_period:=4 ' Four second minimum refresh  
         
     timeout := cnt
     i:=0
@@ -346,7 +346,9 @@ pub SadChirp
     
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
-  
+PRI delay_s(Duration)
+  repeat Duration
+    delay_ms(1000)  
 VAR
   byte httpMethod[8]
   byte httpPath[128]
@@ -499,7 +501,7 @@ pub httpServer | i, contentLength,authorized,queryPtr
         websocket.str(string("</tt></div>"))
         websocket.str(string("<div><tt>Refresh Period: "))
         websocket.dec(info_refresh_period)
-        websocket.str(string("ms</tt></div>"))
+        websocket.str(string("s</tt></div>"))
         websocket.str(string("<div><tt>INA: "))
         repeat i from 0 to 7
           websocket.dec(ina[i])
