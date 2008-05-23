@@ -269,7 +269,7 @@ pub WeatherCog | retrydelay,port,err
 
   repeat
     subsys.StatusLoading
-    if (err:=\WeatherUpdate(port)) <> WEATHER_SUCCESS
+    if (err:=\WeatherUpdate(port)) == WEATHER_SUCCESS
       retrydelay := 1 ' Reset the retry delay
       subsys.StatusIdle
       term.str(string($B,12))    
@@ -304,9 +304,7 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
    
   tel.waitConnectTimeout(2000)
    
-  ifnot tel.isEOF
-    stat_refreshes++
-   
+  ifnot tel.isEOF   
     term.str(string($1,$B,12,"                                       "))
     term.str(string($1,$A,39,$C,$8," ",$1))
     
@@ -330,13 +328,14 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
     timeout := cnt
     i:=0
     repeat
-      if (in := tel.rxcheck) > 0
+      if (in := \tel.rxcheck) > 0
         if in <> 10
-          term.out(in)
+          \term.out(in)
           i++
       else
         ifnot tel.isConnected
           if i > 1
+            stat_refreshes++
             return WEATHER_SUCCESS
           abort 4
         if cnt-timeout>10*clkfreq ' 10 second timeout      
