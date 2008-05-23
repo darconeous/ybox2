@@ -192,6 +192,17 @@ pub httpServer | char, i, contentLength,authorized,queryPtr
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
         authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
+
+    ' Authorization check
+    ' You can comment this out if you want to
+    ' be able to let unauthorized people see the
+    ' front page.
+    {
+    if authorized<>auth#STAT_AUTH
+      httpUnauthorized(authorized)
+      socket.close
+      next
+    }
                
     queryPtr:=http.splitPathAndQuery(@httpPath)         
     if strcomp(@httpMethod,string("GET"))
@@ -310,8 +321,7 @@ pri indexPage | i
   'term.str(string("Sending index page",13))
 
   socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
-  socket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
-  socket.str(string("<style>h1 { text-align: center; } h2,h3 { color: rgb(76,86,108); }</style>"))
+  socket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/ybox2.css' />"))
   socket.str(string("</head><body><h1>"))
   socket.str(@productName)
   socket.str(string("</h1>"))

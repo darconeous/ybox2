@@ -27,7 +27,15 @@ initial_hash long $67452301, $EFCDAB89, $98BADCFE, $10325476
 hash_name byte "MD5",0
 
 PUB hash(dataptr,datalen,h)
+{{ Generates a hash of data in memory in one step }}
+
+  ' Initializes the hash values
   hashstart(h)
+
+  ' We don't need to call hashBlock directly because
+  ' all of the data we are hashing is already in memory.
+  
+  ' Hash the data.  
   hashfinish(dataptr,datalen,datalen,h)
   
 PUB hashStart(h)

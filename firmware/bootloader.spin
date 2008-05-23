@@ -436,7 +436,9 @@ STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
-  
+CON
+  PASSWORD_MIN    = 3  
+  PASSWORD_MAX    = 50  
 
 pri httpUnauthorized(authorized)|challenge[20]
   websocket.str(@HTTP_401)
@@ -485,9 +487,10 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
     ' or download firmware, or change settings
     ' without being authorized because those
     ' actions check for authorization anyway.
-    'if authorized<>auth#STAT_AUTH
-    '  httpUnauthorized(authorized)
-    '  next
+    if authorized<>auth#STAT_AUTH
+      httpUnauthorized(authorized)
+      websocket.close
+      next
 
     queryPtr:=http.splitPathAndQuery(@httpPath)         
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
@@ -513,25 +516,21 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           contentLength--
         buffer[i]~
         buffer2[0]~
-        i:=http.getFieldFromQuery(@buffer,string("username"),@buffer2,127)
-        if i
-          buffer2[i++]:=":"
-          j:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2+i,127-i)
-          ifnot j
-             i~
-          else
-            j:=http.getFieldFromQuery(@buffer,string("pwd2"),@httpQuery,63)
-          if j==0 OR NOT strcomp(@httpQuery,@buffer2+i)
-            i~
-         
-        ifnot i
+
+        if (i:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2,PASSWORD_MAX)) < PASSWORD_MIN
           websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
           websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.txmimeheader(HTTP_HEADER_REFRESH,string("6;url=/"))        
           websocket.str(@CR_LF)
-          websocket.str(string("Passwords didn't match, or something else was wrong.",13,10))
+          websocket.str(string("Password too short.",13,10))        
+        elseif i<>http.getFieldFromQuery(@buffer,string("pwd2"),@httpQuery,PASSWORD_MAX) OR NOT strcomp(@httpQuery,@buffer2)
+          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.txmimeheader(HTTP_HEADER_REFRESH,string("6;url=/"))        
+          websocket.str(@CR_LF)
+          websocket.str(string("Password mismatch, or password too long.",13,10))
         else
-          auth.setAdminPassword(@httpQuery)
-           
+          auth.setAdminPassword(@httpQuery)           
           websocket.str(@HTTP_303)
           websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
           websocket.str(@HTTP_CONNECTION_CLOSE)
@@ -861,7 +860,7 @@ pub addSubmitButton
 pub indexPage(authorized) | i
   websocket.str(string("<html><head><meta name='viewport' content='width=320' />"))
   websocket.str(string("<title>ybox2 bootloader</title>"))
-  websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
+  websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/ybox2.css' />"))
  
   websocket.str(string("</head><body><h1>"))
   websocket.str(@productName)
@@ -914,9 +913,9 @@ pub indexPage(authorized) | i
     if authorized
       beginForm(string("\password"),string("POST"))
 '      addTextField(string("username"),string("Username"),string("admin"),32)
-      addHiddenField(string("username"),string("admin"))
+      websocket.str(string("<div><small>Username is 'admin'.</small></div>"))
       addPasswordField(string("pwd1"),string("Password"),0,32)
-      addPasswordField(string("pwd2"),string("Password"),0,32)
+      addPasswordField(string("pwd2"),string("Password (Repeat)"),0,32)
       addSubmitButton 
       endForm
      

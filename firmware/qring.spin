@@ -23,14 +23,18 @@ DAT
   writepoint  word 0[Q_MAX]
   readpoint   word 0[Q_MAX]
   
-PUB init | i
+PUB init
   if q_lock==-1
-    q_next:=0
-    repeat i from 0 to Q_MAX-1
-      buffer_next[i]:=i+1     
     if(q_lock := locknew) == -1
-      abort FALSE
-  return TRUE
+      abort ERR_RUNTIME
+    reset
+  return 0
+PUB reset | i
+  lock
+  q_next:=0
+  repeat i from 0 to Q_MAX-1
+    buffer_next[i]:=i+1
+  unlock     
 PRI lock
   repeat while NOT lockset(q_lock)
 PRI unlock
@@ -42,7 +46,7 @@ PUB new : i | p
   if i=>Q_MAX
     unlock
     abort ERR_OUT_OF_QUEUES
-  q_next:=buffer_next[i]
+  q_next:=buffer_next[i]~~
   writepoint[i]~
   readpoint[i]~
   i++
@@ -62,6 +66,11 @@ PUB delete(i) | old_page
   
   lock
 
+  ' Sanity check
+  if buffer_next[i] <> 255
+    unlock
+    abort ERR_Q_INVALID
+    
   ' Insert Queue back into pool
   buffer_next[i]:=q_next
   q_next:=i
@@ -124,18 +133,16 @@ PUB pulldata(i,ptr,maxlen) : len | char
   if maxlen<len
     len:=maxlen
 
-  ifnot len
-    return
-      
-  if len+readpoint[i]>Q_SIZE
-    bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], Q_SIZE-readpoint[i])
-    ptr+=Q_SIZE-readpoint[i]
-    bytemove(ptr,@buffer+i<<Q_BITS, len-(Q_SIZE-readpoint[i]))
-    readpoint[i] := (readpoint[i] + len) & buffer_mask
-  else
-    bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], len)
-    readpoint[i] := (readpoint[i] + len) & buffer_mask
-
+  if len
+    if len+readpoint[i]>Q_SIZE
+      bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], Q_SIZE-readpoint[i])
+      ptr+=Q_SIZE-readpoint[i]
+      bytemove(ptr,@buffer+i<<Q_BITS, len-(Q_SIZE-readpoint[i]))
+      readpoint[i] := (readpoint[i] + len) & buffer_mask
+    else
+      bytemove(ptr,@buffer+i<<Q_BITS+readpoint[i], len)
+      readpoint[i] := (readpoint[i] + len) & buffer_mask
+     
 PUB isEmpty(i)
   ifnot i
     return TRUE

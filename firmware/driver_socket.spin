@@ -760,6 +760,7 @@ PUB close(handle) | handle_addr
 PUB closeall | handle
   repeat handle from 0 to constant(sNumSockets - 1)
     close(handle)
+  q.reset
     
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise

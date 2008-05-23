@@ -463,6 +463,17 @@ pub httpServer | i, contentLength,authorized,queryPtr
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
         authorized:=auth.authenticateResponse(@buffer,@httpMethod,@httpPath)
 
+    ' Authorization check
+    ' You can comment this out if you want to
+    ' be able to let unauthorized people see the
+    ' front page. Even if you uncomment this,
+    ' unauthorized users won't be able to
+    ' change the settings or reboot, due to
+    ' redundant checks below.
+    if authorized<>auth#STAT_AUTH
+      httpUnauthorized(authorized)
+      websocket.close
+      next
              
     queryPtr:=http.splitPathAndQuery(@httpPath)
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
@@ -473,7 +484,7 @@ pub httpServer | i, contentLength,authorized,queryPtr
         websocket.str(@CR_LF)
 
         websocket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
-        websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/iphone/iPhoneButtons.css' />"))
+        websocket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/ybox2.css' />"))
  
         websocket.str(string("</head><body><h1>"))
         websocket.str(@productName)
