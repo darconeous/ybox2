@@ -431,8 +431,10 @@ HTTP_CONNECTION_CLOSE   BYTE "Connection: close",13,10,0
 OK         BYTE "OK",13,10,0
 
 
-RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.eeprom",0
+RAMIMAGE_EEPROM_FILE    BYTE "/ramimage.binary",0
 STAGE2_EEPROM_FILE      BYTE "/stage2.eeprom",0
+FULL_EEPROM_FILE      BYTE "/full.eeprom",0
+
 CONFIG_BIN_FILE         BYTE "/config.bin",0
 CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
@@ -617,42 +619,27 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_LENGTH,string("32768"))        
         websocket.str(@CR_LF)
         websocket.txdata(0,$8000)
+      elseif strcomp(@httpPath,@FULL_EEPROM_FILE)
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
+          websocket.close
+          next
+        sendFromEEPROM(@FULL_EEPROM_FILE+1,0,$10000-settings#SettingsSize)
+        
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)
           websocket.close
           next
-        websocket.str(@HTTP_200)
-        websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=stage2.eeprom"))        
-        websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
-        websocket.str(string(": "))
-        websocket.dec(settings.getLong(settings#MISC_STAGE2_SIZE))
-        websocket.str(@CR_LF)        
-        websocket.str(@CR_LF)
-        repeat i from 0 to settings.getLong(settings#MISC_STAGE2_SIZE)-1 step 128
-          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
-            quit
-          websocket.txData(@buffer,128)
+        ifnot i:=settings.getLong(settings#MISC_STAGE2_SIZE)
+          i:=$8000-settings#SettingsSize
+        sendFromEEPROM(@STAGE2_EEPROM_FILE+1,$8000,i)
       elseif strcomp(@httpPath,@CONFIG_BIN_FILE)
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)
           websocket.close
           next
-        websocket.str(@HTTP_200)
-        websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-bin"))        
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.bin"))        
-        websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
-        websocket.str(string(": "))
-        websocket.dec(settings#SettingsSize)
-        websocket.str(@CR_LF)        
-        websocket.str(@CR_LF)
-        repeat i from settings#SettingsBottom to settings#SettingsTop step 128
-          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
-            quit
-          websocket.txData(@buffer,128)
+        sendFromEEPROM(@CONFIG_BIN_FILE+1,$8000+settings#SettingsBottom,settings#SettingsSize)
       elseif strcomp(@httpPath,@CONFIG_PLIST_FILE)
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)
@@ -725,6 +712,24 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
       websocket.str(@HTTP_501)
     
     websocket.close
+PUB sendFromEEPROM(filename,addr,len)| i
+  websocket.str(@HTTP_200)
+  websocket.str(@HTTP_CONNECTION_CLOSE)
+  websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
+  websocket.str(@HTTP_HEADER_CONTENT_DISPOS)
+  websocket.str(string(": attachment; filename="))
+  websocket.str(filename)
+  websocket.str(@CR_LF)        
+  websocket.str(@HTTP_HEADER_CONTENT_LENGTH)
+  websocket.str(string(": "))
+  websocket.dec(len)
+  websocket.str(@CR_LF)        
+  websocket.str(@CR_LF)
+  repeat i from 0 to len-1 step 128
+    if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+addr, @buffer, 128)
+      quit
+    websocket.txData(@buffer,128)
+   
 pub infoPage | i
   websocket.str(string("ybox.version = '"))
   websocket.str(@productVersion)
@@ -938,6 +943,8 @@ pub indexPage(authorized) | i
   httpOutputLink(@RAMIMAGE_EEPROM_FILE,0,@RAMIMAGE_EEPROM_FILE+1)
   websocket.tx(" ")
   httpOutputLink(@STAGE2_EEPROM_FILE,0,@STAGE2_EEPROM_FILE+1)
+  websocket.tx(" ")
+  httpOutputLink(@FULL_EEPROM_FILE,0,@FULL_EEPROM_FILE+1)
   websocket.tx(" ")
   httpOutputLink(@CONFIG_BIN_FILE,0,@CONFIG_BIN_FILE+1)
   websocket.tx(" ")

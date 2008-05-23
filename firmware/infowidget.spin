@@ -336,7 +336,7 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
           i++
       else
         ifnot tel.isConnected
-          if i
+          if i > 1
             return WEATHER_SUCCESS
           abort 4
         if cnt-timeout>10*clkfreq ' 10 second timeout      
