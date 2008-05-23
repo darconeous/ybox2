@@ -4,17 +4,10 @@
 
         ABOUT
 
-        This simple (!?) program will poll a webpage for information
-        and display it on your TV screen, updating in 30 second
-        intervals. You can configure where it gets the data
-        by connecting to the device with a web browser and
-        changing the settings. By default it will grab weather
-        data from the 95008 zip code, which you can change
-        using any web browser.
-
-        If a password was set in the bootloader, it will be
-        required to change the settings.
-        
+        This example demonstrates how to make a ybox2
+        program which has a web page which allows you to
+        do things like change the color of the LED,
+        make noises, etc.        
 }}
 CON
 

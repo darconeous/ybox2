@@ -1,12 +1,19 @@
 {{
-        ybox2 - main object
+        ybox2 - Info Widget
         http://www.deepdarc.com/ybox2
 
-        See the method 'initial_configuration' to change settings
-        like the MAC address, IP address, server address, etc.
+        ABOUT
 
-        If your pin assignments are different, you'll need to
-        change them here and in the subsys object.
+        This simple (!?) program will poll a webpage for information
+        and display it on your TV screen, updating in 30 second
+        intervals. You can configure where it gets the data
+        by connecting to the device with a web browser and
+        changing the settings. By default it will grab weather
+        data from the 95008 zip code, which you can change
+        using any web browser.
+
+        If a password was set in the bootloader, it will be
+        required to change the settings.
 }}
 CON
 
