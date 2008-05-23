@@ -261,14 +261,15 @@ PUB main
       subsys.StatusFatalError
 }}    
 
-
+CON
+  WEATHER_SUCCESS = 860276
 pub WeatherCog | retrydelay,port,err
   port := 20000
   retrydelay := 1 ' Reset the retry delay
 
   repeat
     subsys.StatusLoading
-    if (err:=\WeatherUpdate(port))
+    if (err:=\WeatherUpdate(port)) <> WEATHER_SUCCESS
       retrydelay := 1 ' Reset the retry delay
       subsys.StatusIdle
       term.str(string($B,12))    
@@ -277,7 +278,8 @@ pub WeatherCog | retrydelay,port,err
       tel.close
       delay_s(info_refresh_period)     ' 30 sec delay
     else
-      subsys.StatusErrorCode(err)
+      if err>0
+        subsys.StatusErrorCode(err)
       stat_errors++
       showMessage(string("Error!"))    
       tel.closeall
@@ -334,12 +336,14 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
           i++
       else
         ifnot tel.isConnected
-          return NOT i
+          if i
+            return WEATHER_SUCCESS
+          abort 4
         if cnt-timeout>10*clkfreq ' 10 second timeout      
           abort(subsys#ERR_DISCONNECTED)
   else
     abort(subsys#ERR_NO_CONNECT)
-  return 666
+  return 5
      
 PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
