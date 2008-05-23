@@ -916,7 +916,7 @@ pub indexPage(authorized) | i
      
      
     if authorized
-      beginForm(string("\password"),string("POST"))
+      beginForm(string("/password"),string("POST"))
 '      addTextField(string("username"),string("Username"),string("admin"),32)
       websocket.str(string("<div><small>Username is 'admin'.</small></div>"))
       addPasswordField(string("pwd1"),string("Password"),0,32)

@@ -539,7 +539,7 @@ pub httpServer | i, contentLength,authorized,queryPtr
         websocket.str(string("</tt></div>"))
 
         websocket.str(string("<h2>Settings</h2>"))
-        websocket.str(string("<form action='\config' method='POST'>"))
+        websocket.str(string("<form action='/config' method='POST'>"))
         settings.getString(settings#SERVER_HOST,@httpPath,32)
         addTextField(string("SH"),string("Server Host"),@httpPath,32)
         settings.getString(settings#SERVER_Path,@httpPath,32)
