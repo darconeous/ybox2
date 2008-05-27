@@ -16,7 +16,7 @@ CON
   STAT_AUTH =    TRUE
   HASH_LENGTH =  16' hasher#HASH_LENGTH
   NONCE_LENGTH = 4 'In bytes
-  RTCADDR = $7A00
+  RTCADDR = $8000-settings#SettingsSize-4
 DAT
 type byte "Digest",0
 realm byte "ybox2",0

@@ -30,7 +30,9 @@ CON
   IRPin = 15
   BTTNPin = 16
   SPKRPin = 8
-  RTCADDR = $7A00
+
+  RTCADDR = $8000-settings#SettingsSize-4
+  BOOTTIMEADDR = $8000-settings#SettingsSize-8
 
 
   ' Error codes
@@ -71,7 +73,9 @@ PUB init | LED_Conf
       LEDRJmp ^= %1111_000000000_000000000 ' Invert Red output
       LEDGJmp ^= %1111_000000000_000000000 ' Invert Green Output
       LEDBJmp ^= %1111_000000000_000000000 ' Invert Blue Output
-       
+  LONG[RTCADDR]~
+  LONG[BOOTTIMEADDR]~
+         
   subsyscog := cognew(@run, @LED_R)+1 
   StatusIdle
 
@@ -187,8 +191,12 @@ PRI ColorCycle
     FadeToColorBlocking(0,0,255,3000)   ' blue
     FadeToColorBlocking(0,255,0,3000)   ' green
 
-PUB RTC
+PUB uptime
   return long[RTCADDR]
+PUB RTC
+  return long[RTCADDR]+long[BOOTTIMEADDR]
+PUB setRTC(x)
+  long[BOOTTIMEADDR]:=x-long[RTCADDR]
       
 DAT
 

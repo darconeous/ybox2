@@ -29,8 +29,8 @@ CON
   version = 3     ' major version
   release = 2     ' minor version
 
-OBJ
-  spi : "SPI_Engine"
+'OBJ
+'  spi : "SPI_Engine"
 
 CON
 ' ***************************************
@@ -61,41 +61,43 @@ DAT
   '    if you have more than one device using this code on a local network.
   ' ** If you plan on commercial deployment, you must purchase MAC address
   '    groups from IEEE or some other standards organization.
+  int             long 0 ' For allignment
+
   eth_mac         byte    $10, $00, $00, $00, $00, $01
 
 ' ***************************************
 ' **         Global Variables          **
 ' ***************************************
+ 
+  packetheader    byte 0[6]
+
   rxlen           word 0
   tx_end          word 0
- 
-  cs              byte 0
-  sck             byte 0
-  si              byte 0
-  so              byte 0
-  int             byte 0
-                  
-  packetheader    byte 0[6]
         
-                  long 0 ' For allignment
   packet          byte 0[MAXFRAME]
 
-PUB start(i_cs, i_sck, i_si, i_so, i_int, xtalout, macptr)
+PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
 '' Starts the driver (uses 1 cog for spi engine)
 
+{
   cs := i_cs
   sck := i_sck
   si := i_si
   so := i_so
-  int := i_int
+}
+  int := _int
   
+{
   dira[cs] := %1
   dira[sck] := %1
   dira[si] := %1
   dira[so] := %0
+}
   dira[int] := %0
 
-  eth_csoff
+  spi_start(_cs, _sck, _so, _si)
+
+'  eth_csoff
 
   ' Since some people don't have 25mhz crystals, we use the cog counters
   ' to generate a 25mhz frequency for the ENC28J60 (I love the Propeller)
@@ -113,60 +115,48 @@ PUB start(i_cs, i_sck, i_si, i_so, i_int, xtalout, macptr)
 
   ' check to make sure its a valid supported silicon rev
   banksel(EREVID)
-  return rd_cntlreg(EREVID) == silicon_rev      ' return true if silicon rev match
+  return rd_cntlreg(EREVID) => silicon_rev      ' return true if silicon rev match
 
 PUB stop
 '' Stops the driver, frees 1 cog
 
-  spi.stop
+  spi_stop
 
 PUB rd_macreg(address) : data
 '' Read MAC Control Register
 
-  eth_cson
-  eth_out(cRCR | address)
-  eth_out(0)                    ' transmit dummy byte
-  data := eth_in                ' get actual data
-  eth_csoff
+  spi_out_cs(cRCR | address)
+  spi_out_cs(0)                 ' transmit dummy byte
+  data := spi_in                ' get actual data
 
 PUB rd_cntlreg(address) : data
 '' Read ETH Control Register
 
-  eth_cson
-  eth_out(cRCR | address)
-  data := eth_in
-  eth_csoff
+  spi_out_cs(cRCR | address)
+  data := spi_in
 
 PUB wr_reg(address, data)
 '' Write MAC and ETH Control Register
 
-  eth_cson
-  eth_out(cWCR | address)
-  eth_out(data)
-  eth_csoff
+  spi_out_cs(cWCR | address)
+  spi_out(data)
 
 PUB bfc_reg(address, data)
 '' Clear Control Register Bits
 
-  eth_cson
-  eth_out(cBFC | address)
-  eth_out(data)
-  eth_csoff
+  spi_out_cs(cBFC | address)
+  spi_out(data)
 
 PUB bfs_reg(address, data)
 '' Set Control Register Bits
 
-  eth_cson
-  eth_out(cBFS | address)
-  eth_out(data)
-  eth_csoff
+  spi_out_cs(cBFS | address)
+  spi_out(data)
 
 PUB soft_reset
 '' Soft Reset ENC28J60
 
-  eth_cson
-  eth_out(cSC)
-  eth_csoff
+  spi_out(cSC)
 
 PUB banksel(register)
 '' Select Control Register Bank
@@ -198,37 +188,26 @@ PUB wr_phy(register, data)
   banksel(MISTAT)
   repeat while ((rd_macreg(MISTAT) & MISTAT_BUSY) > 0)
 
-PUB isLinkUp
-  return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
-  
 PUB rd_sram : data
 '' Read ENC28J60 8k Buffer Memory
 
-  eth_cson
-  eth_out(cRBM)
-  data := eth_in
-  eth_csoff
-PUB rd_sram_block(data_ptr,size)
-  eth_cson
-  eth_out(cRBM)
-  repeat while size--
-    byte[data_ptr++] := eth_in
-  eth_csoff
-
+  spi_out_cs(cRBM)
+  data := spi_in
 
 PUB wr_sram(data)
 '' Write ENC28J60 8k Buffer Memory
 
-  eth_cson
-  eth_out(cWBM)
-  eth_out(data)
-  eth_csoff
+  spi_out_cs(cWBM)
+  spi_out(data)
+
+
+PUB rd_sram_block(data_ptr,size)
+  'repeat size
+  '  byte[data_ptr++]:=rd_sram
+  blockread(data_ptr,size)
+
 PUB wr_sram_block(data_ptr,size)
-  eth_cson
-  eth_out(cWBM)
-  repeat while size--
-    eth_out(byte[data_ptr++])
-  eth_csoff
+  blockwrite(data_ptr, size)
 
 PUB init_ENC28J60 | i
 '' Init ENC28J60 Chip
@@ -302,6 +281,9 @@ PUB init_ENC28J60 | i
   ' enable packet reception
   bfs_reg(ECON1, ECON1_RXEN)
 
+PUB isLinkUp
+  return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
+
 PUB get_frame | packet_addr, new_rdptr
 '' Get Ethernet Frame from Buffer
 
@@ -309,8 +291,9 @@ PUB get_frame | packet_addr, new_rdptr
   wr_reg(ERDPTL, packetheader[nextpacket_low])
   wr_reg(ERDPTH, packetheader[nextpacket_high])
 
-  repeat packet_addr from 0 to 5
-    packetheader[packet_addr] := rd_sram
+  rd_sram_block(@packetheader,6)
+  'repeat packet_addr from 0 to 5
+  '  packetheader[packet_addr] := rd_sram
 
   rxlen := (packetheader[rec_bytecnt_high] << 8) + packetheader[rec_bytecnt_low]
 
@@ -372,8 +355,8 @@ PUB wr_frame_data(data,len) | i
   'repeat i from 0 to len-1
   '  wr_frame(byte[data][i])
 
-PUB wr_frame_pad(len) | i
-  repeat i from 0 to len-1
+PUB wr_frame_pad(len)
+  repeat len
     wr_frame(0)
 
 PUB send_frame
@@ -458,16 +441,16 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
 
   banksel(EDMACSL)
 
-  'if swapped
-  'crc := rd_cntlreg(EDMACSH) + (rd_cntlreg(EDMACSL) << 8)
-  'else
   crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
   
   ' Now we write out the checksum back to the device
   banksel(EWRPTL)
   wr_reg(EWRPTH, crc_end >> 8)
   wr_reg(EWRPTL, crc_end)
-  wr_sram(crc>>8) 
+
+  crc-=$1600 ' WTF!?!?
+  
+  wr_sram((crc>>8)) 
   wr_sram(crc) 
   return 1
 
@@ -525,18 +508,6 @@ PUB get_rxlen
 '' Gets received packet length
   return rxlen - 4             ' knock off the 4 byte Frame Check Sequence CRC, not used anywhere outside of this driver (pg 31 datasheet)
 
-PRI eth_out(value)
-  spi.shiftout(si, sck, spi#mmsbfirst, 8, value)
-
-PRI eth_in
-  return spi.shiftin(so, sck, spi#mmsbpre, 8)
-
-PRI eth_cson
-  outa[cs] := %0
-
-PRI eth_csoff
-  outa[cs] := %1
-
 PRI delay_us(Duration)
   waitcnt(((clkfreq / 1_000_000 * Duration - 3928)) + cnt)
   
@@ -576,6 +547,207 @@ PRI fraction(a, b, shift) : f
       a -= b
       f++           
     a <<= 1
+
+' ***************************************
+' **          ASM SPI Engine           **
+' ***************************************   
+DAT
+  cog         long 0
+  command     long 0
+  
+CON
+  SPIOUT        = %00_0001
+  SPIIN         = %00_0010
+  SRAMWRITE     = %00_0100
+  SRAMREAD      = %00_1000
+  CSON          = %01_0000
+  CSOFF         = %10_0000
+
+  SPIBITS       = 8
+
+PRI spi_out(value)
+  setcommand(constant(SPIOUT | CSON | CSOFF), @value)
+  
+PRI spi_out_cs(value)
+  setcommand(constant(SPIOUT | CSON), @value)
+
+PRI spi_in | value
+  setcommand(constant(SPIIN | CSON | CSOFF), @value)
+  return value
+  
+PRI spi_in_cs | value
+  setcommand(constant(SPIIN | CSON), @value)
+  return value
+
+PRI blockwrite(startaddr, count)
+  setcommand(SRAMWRITE, @startaddr)
+
+PRI blockread(startaddr, count)
+  setcommand(SRAMREAD, @startaddr)
+  
+PRI spi_start(_cs, _sck, _di, _do)
+  spi_stop
+
+  cspin := |< _cs
+  dipin := |< _di
+  dopin := |< _do
+  clkpin := |< _sck
+  
+  cog := cognew(@init, @command) + 1
+  
+PRI spi_stop
+  if cog
+    cogstop(cog~ - 1)
+  command~
+  
+PRI setcommand(cmd, argptr)
+  command := cmd << 16 + argptr                       'write command and pointer
+  repeat while command                                'wait for command to be cleared, signifying receipt
+
+DAT
+              org
+init
+              or      dira, cspin                       'pin directions
+              andn    dira, dipin
+              or      dira, dopin
+              or      dira, clkpin
+
+              or      outa, cspin                       'turn off cs (bring it high)
+              
+loop          wrlong  zero,par                          'zero command (tell spin we are done processing)
+:subloop      rdlong  t1,par                    wz      'wait for command
+        if_z  jmp     #:subloop
+
+              mov     addr, t1                          'used for holding return addr to spin vars
+        
+              rdlong  arg0, t1                          'arg0
+              add     t1, #4
+              rdlong  arg1, t1                          'arg1                                             
+              
+'             wrlong  zero,par                          'zero command to signify command received
+
+              mov     lkup, addr                        'get the command var from spin
+              shr     lkup, #16                         'extract the cmd from the command var
+
+              test    lkup, #CSON               wz      'turn on cs
+        if_nz andn    outa, cspin
+        
+              test    lkup, #SPIOUT             wz      'spi out
+        if_nz call    #spi_out_
+              test    lkup, #SPIIN              wz      'spi in 
+        if_nz call    #xspi_in_
+              test    lkup, #SRAMWRITE          wz      'sram block write
+        if_nz jmp     #sram_write_
+              test    lkup, #SRAMREAD           wz      'sram block read
+        if_nz jmp     #sram_read_
+
+              test    lkup, #CSOFF              wz      'cs off
+        if_nz or      outa, cspin
+
+              jmp #loop                                 ' no cmd found
+              
+
+
+spi_out_                                                'SHIFTOUT Entry
+              mov     t4,             #SPIBITS          '     Load number of data bits
+              andn    outa,           dopin             '          PreSet DataPin LOW
+              andn    outa,           clkpin            '          PreSet ClockPin LOW
+
+              mov     t3,             arg0              '          Load t3 with DataValue
+              mov     t5,             #%1               '          Create MSB mask     ;     load t5 with "1"
+              shl     t5,             #SPIBITS          '          Shift "1" N number of bits to the left.
+              shr     t5,             #1                '          Shifting the number of bits left actually puts
+                                                        '          us one more place to the left than we want. To
+                                                        '          compensate we'll shift one position right.              
+:sout_loop    test    t3,             t5      wc        '          Test MSB of DataValue
+              muxc    outa,           dopin             '          Set DataBit HIGH or LOW
+              shr     t5,             #1                '          Prepare for next DataBit
+              call    #clock                            '          Send clock pulse
+              djnz    t4,             #:sout_loop       '          Decrement t4 ; jump if not Zero
+              andn    outa,           dopin
+              
+spi_out__ret  ret                                       '     Go wait for next command
+
+              
+
+spi_in_                                                 'SHIFTIN Entry
+              mov     t4,             #SPIBITS          '     Load number of data bits
+              andn    outa,           clkpin            '          PreSet ClockPin LOW
+
+:sin_loop     test    dipin,          ina     wc        '          Read Data Bit into 'C' flag
+              rcl     t3,             #1                '          rotate "C" flag into return value
+              call    #clock                            '          Send clock pulse
+              djnz    t4,             #:sin_loop        '          Decrement t4 ; jump if not Zero
+
+              mov     arg0, t3
+spi_in__ret   ret                                       '     Go wait for next command
+
+clock
+              mov     clkpin,         #0      wz,nr     '     Clock Pin
+              muxz    outa,           clkpin            '          Set ClockPin HIGH
+              muxnz   outa,           clkpin            '          Set ClockPin LOW
+clock_ret     ret                                       '          return
+
+xspi_in_
+              call #spi_in_
+              wrlong  arg0, addr
+xspi_in__ret  ret
+
+' SRAM Block Read/Write
+sram_write_   ' block write (arg0=hub addr, arg1=count)
+              mov t1, arg0
+              mov t2, arg1
+
+:loop         andn outa, cspin
+              mov arg0, #cWBM
+              call #spi_out_
+              rdbyte arg0, t1
+              call #spi_out_              
+              or outa, cspin
+              add t1, #1
+              djnz t2, #:loop
+              
+              jmp #loop
+              
+sram_read_    ' block read (arg0=hub addr, arg1=count)
+              mov t1, arg0
+              mov t2, arg1
+              
+:loop         andn outa, cspin
+              mov arg0, #cRBM
+              call #spi_out_
+              call #spi_in_
+              wrbyte arg0, t1
+              add t1, #1
+              or outa, cspin
+              djnz t2, #:loop
+              
+              jmp #loop
+
+zero                    long    0                       'constants
+
+                                                        'values filled by spin code before launching
+cspin                   long    0                       ' chip select pin
+dipin                   long    0                       ' data in pin (enc28j60 -> prop)
+dopin                   long    0                       ' data out pin (prop -> enc28j60)
+clkpin                  long    0                       ' clock pin (prop -> enc28j60)
+
+                                                        'temp variables
+t1                      res     1                       '     loop and cog shutdown                          
+t2                      res     1                       '     loop and cog shutdown
+t3                      res     1                       '     Used to hold DataValue SHIFTIN/SHIFTOUT
+t4                      res     1                       '     Used to hold # of Bits
+t5                      res     1                       '     Used for temporary data mask
+
+addr                    res     1                       '     Used to hold return address of first Argument passed
+lkup                    res     1                       '     Used to hold command lookup
+
+                                                        'arguments passed to/from high-level Spin
+arg0                    res     1                       ' bits / start address
+arg1                    res     1                       ' value / count                                                          
+
+
+
 
 CON
 ' ***************************************

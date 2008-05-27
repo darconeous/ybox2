@@ -409,14 +409,16 @@ VAR
   byte httpHeader[32]
 
 DAT
-HTTP_200      BYTE      "HTTP/1.1 200 OK"
+HTTP_VERSION  BYTE      "HTTP/1.1 ",0
+HTTP_200      BYTE      "200 OK"
 CR_LF         BYTE      13,10,0
-HTTP_303      BYTE      "HTTP/1.1 303 See Other",13,10,0
-HTTP_404      BYTE      "HTTP/1.1 404 Not Found",13,10,0
-HTTP_403      BYTE      "HTTP/1.1 403 Forbidden",13,10,0
-HTTP_401      BYTE      "HTTP/1.1 401 Authorization Required",13,10,0
-HTTP_411      BYTE      "HTTP/1.1 411 Length Required",13,10,0
-HTTP_501      BYTE      "HTTP/1.1 501 Not Implemented",13,10,0
+HTTP_303      BYTE      "303 See Other",13,10,0
+HTTP_400      BYTE      "400 Bad Request",13,10
+HTTP_401      BYTE      "401 Authorization Required",13,10,0
+HTTP_403      BYTE      "403 Forbidden",13,10,0
+HTTP_404      BYTE      "404 Not Found",13,10,0
+HTTP_411      BYTE      "411 Length Required",13,10,0
+HTTP_501      BYTE      "501 Not Implemented",13,10,0
 
 HTTP_HEADER_SEP     BYTE ": ",0
 HTTP_HEADER_CONTENT_TYPE BYTE "Content-Type",0
@@ -443,6 +445,7 @@ CON
   PASSWORD_MAX    = 50  
 
 pri httpUnauthorized(authorized)|challenge[20]
+  websocket.str(@HTTP_VERSION)
   websocket.str(@HTTP_401)
   websocket.str(@HTTP_CONNECTION_CLOSE)
   auth.generateChallenge(@challenge,constant(20*4),authorized)
@@ -451,6 +454,7 @@ pri httpUnauthorized(authorized)|challenge[20]
   websocket.str(@HTTP_401)
 
 pri httpNotFound
+  websocket.str(@HTTP_VERSION)
   websocket.str(@HTTP_404)
   websocket.str(@HTTP_CONNECTION_CLOSE)
   websocket.str(@CR_LF)
@@ -497,12 +501,14 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
     queryPtr:=http.splitPathAndQuery(@httpPath)         
     if strcomp(@httpMethod,string("GET")) or strcomp(@httpMethod,string("POST"))
       if strcomp(@httpPath,string("/"))
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
-        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,@HTTP_CONTENT_TYPE_HTML)        
         websocket.str(@CR_LF)
         indexPage(authorized)
       elseif strcomp(@httpPath,string("/info"))
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
@@ -520,28 +526,32 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         buffer2[0]~
 
         if (i:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2,PASSWORD_MAX)) < PASSWORD_MIN
-          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_VERSION)
+          websocket.str(@HTTP_400)
           websocket.str(@HTTP_CONNECTION_CLOSE)
-          websocket.txmimeheader(HTTP_HEADER_REFRESH,string("6;url=/"))        
+          websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("6;url=/"))        
           websocket.str(@CR_LF)
           websocket.str(string("Password too short.",13,10))        
         elseif i<>http.getFieldFromQuery(@buffer,string("pwd2"),@httpQuery,PASSWORD_MAX) OR NOT strcomp(@httpQuery,@buffer2)
-          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_VERSION)
+          websocket.str(@HTTP_400)
           websocket.str(@HTTP_CONNECTION_CLOSE)
-          websocket.txmimeheader(HTTP_HEADER_REFRESH,string("6;url=/"))        
+          websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("6;url=/"))        
           websocket.str(@CR_LF)
           websocket.str(string("Password mismatch, or password too long.",13,10))
         else
           auth.setAdminPassword(@httpQuery)           
+          websocket.str(@HTTP_VERSION)
           websocket.str(@HTTP_303)
-          websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
           websocket.str(@HTTP_CONNECTION_CLOSE)
+          websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
           websocket.str(@CR_LF)
           websocket.str(@OK)
       elseif strcomp(@httpPath,string("/reboot"))
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
+        websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("REBOOTING",13,10))
         websocket.close
@@ -549,16 +559,18 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
         reboot
       elseif strcomp(@httpPath,string("/irtest"))
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("5;url=/"))        
+        websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("5;url=/"))        
         websocket.str(@CR_LF)
         subsys.irTest
         websocket.str(string("Status LED should now blink on IR activity.",13,10))
       elseif strcomp(@httpPath,string("/stage2"))
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
-        websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
+        websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("12;url=/"))        
         websocket.str(@CR_LF)
         websocket.str(string("BOOTING STAGE 2",13,10))
         websocket.close
@@ -569,9 +581,10 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close                                                               
           next
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_303)
-        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@CR_LF)
         websocket.str(@OK)
       elseif strcomp(@httpPath,string("/ledconfig"))
@@ -579,6 +592,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close
           next
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
@@ -595,9 +609,10 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close
           next
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_303)
-        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
         websocket.str(@CR_LF)
         if byte[queryPtr][0]=="1"
           settings.setByte(settings#MISC_AUTOBOOT,1)
@@ -612,6 +627,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close
           next
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        
@@ -645,6 +661,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close
           next
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.txmimeheader(@HTTP_HEADER_CONTENT_DISPOS,string("attachment; filename=config.plist"))        
@@ -658,11 +675,13 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.close
         next
       if not contentLength
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_411)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
         websocket.str(@HTTP_411)
       elseif strcomp(@httpPath,@RAMIMAGE_EEPROM_FILE) OR strcomp(@httpPath,@CONFIG_BIN_FILE)
+        websocket.str(@HTTP_VERSION)
         websocket.str(@HTTP_403)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
@@ -671,7 +690,8 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         if (i:=\downloadFirmwareHTTP(contentLength))
           subsys.StatusFatalError
           subsys.chirpSad
-          websocket.str(string("HTTP/1.1 400 Bad Request",13,10))
+          websocket.str(@HTTP_VERSION)
+          websocket.str(@HTTP_400)
           websocket.str(@HTTP_CONNECTION_CLOSE)
           websocket.str(@CR_LF)
           websocket.str(string("Upload Failure",13,10))
@@ -679,9 +699,10 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           websocket.str(@CR_LF)
         else
           if strcomp(queryPtr,string("boot")) OR stage_two
+            websocket.str(@HTTP_VERSION)
             websocket.str(@HTTP_200)
-            websocket.txmimeheader(HTTP_HEADER_REFRESH,string("12;url=/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
+            websocket.txmimeheader(@HTTP_HEADER_REFRESH,string("12;url=/"))        
             websocket.str(@CR_LF)
             repeat i from 0 to md5#HASH_LENGTH-1
               websocket.hex(hash[i],2)
@@ -695,9 +716,10 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
             else
               boot_stage2
           else
+            websocket.str(@HTTP_VERSION)
             websocket.str(@HTTP_303)
-            websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             websocket.str(@HTTP_CONNECTION_CLOSE)
+            websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
             websocket.str(@CR_LF)
             repeat i from 0 to md5#HASH_LENGTH-1
               websocket.hex(hash[i],2)
@@ -706,6 +728,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
       else
         httpNotFound
     else
+      websocket.str(@HTTP_VERSION)
       websocket.str(@HTTP_501)
       websocket.str(@HTTP_CONNECTION_CLOSE)
       websocket.str(@CR_LF)
@@ -713,6 +736,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
     
     websocket.close
 PUB sendFromEEPROM(filename,addr,len)| i
+  websocket.str(@HTTP_VERSION)
   websocket.str(@HTTP_200)
   websocket.str(@HTTP_CONNECTION_CLOSE)
   websocket.txmimeheader(@HTTP_HEADER_CONTENT_TYPE,string("application/x-eeprom"))        

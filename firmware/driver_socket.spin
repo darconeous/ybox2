@@ -16,7 +16,8 @@ CON
   _xinfreq = 5_000_000                                                      
   version = 1.3
   apiversion = 3
-  RTCADDR = $7A00
+  RTCADDR = $8000-settings#SettingsSize-4
+
   MIN_ADVERTISED_WINDOW = q#Q_SIZE/2
   
 DAT
@@ -76,6 +77,8 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
   
   random.start
   randseed := random.random
+  pkt_isn := random.random
+  pkt_id := random.random
   random.stop
 
   ifnot settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6)
