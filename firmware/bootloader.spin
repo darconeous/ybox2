@@ -102,6 +102,7 @@ OBJ
   http          : "http"
   auth          : "auth_digest"                                   
   md5           : "MD5"
+  base16        : "base16"
 VAR
   long stage_two
   long stack[10] 
@@ -279,13 +280,15 @@ PRI resetSettings | key, nextKey, ledconf
         if settings.getData(key,@ledconf,4) < 4
           ' If we are less than the expected size, kill it
           settings.removeKey(key)
-        elseif ((ledconf>>16)&%11111) < 8 OR ((ledconf>>8)&%11111) < 8 OR (ledconf&%11111) < 8
+        elseifnot LEDConfIsSane(ledconf)
           ' Make sure no pin assignments are less than 8
           settings.removeKey(key)
       other: settings.removeKey(key)
   while (key:=nextKey)
 
   settings.commit
+PRI LEDConfIsSane(ledconf)
+  return NOT (((ledconf>>16)&%11111) < 8 OR ((ledconf>>8)&%11111) < 8 OR (ledconf&%11111) < 8)
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE2,TRUE)
@@ -596,6 +599,13 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
+        if base16.decode(@i,queryPtr,4)==4 AND LEDConfIsSane(i)
+          settings.setLong(settings#MISC_LED_CONF,i)
+          settings.commit
+          websocket.str(string("LED Configuration changed. (NEEDS REBOOT)",13,10))
+        else        
+          websocket.str(string("Invalid LED Configuration.",13,10))
+        {
         if byte[queryPtr][0]=="1"
           settings.setLong(settings#MISC_LED_CONF,$000A0B09)
           settings.commit
@@ -604,6 +614,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           settings.removeKey(settings#MISC_LED_CONF)
           settings.commit
           websocket.str(string("DISABLED (NEEDS REBOOT)",13,10))
+         }
       elseif strcomp(@httpPath,string("/autoboot"))
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)

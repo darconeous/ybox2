@@ -268,7 +268,7 @@ pub httpServer | char, i, contentLength,authorized,queryPtr
         socket.str(string("Location: /",13,10))
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
-        httpQuery[6]:=0
+        byte[queryPtr][6]:=0
         i:=numbers.FromStr(queryPtr,numbers#HEX)
         subsys.fadeToColor(byte[@i][2],byte[@i][1],byte[@i][0],1000)
         socket.hex(byte[@i][2],2)
