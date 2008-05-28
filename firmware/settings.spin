@@ -88,7 +88,11 @@ CON { Keys for various stuff }
   SERVER_PATH        = "S"+("T"<<8) 
   SERVER_HOST        = "S"+("H"<<8)
 
-  
+  ALARM_ON           = "A"+("O"<<8)
+  ALARM_HOUR         = "A"+("H"<<8)
+  ALARM_MIN          = "A"+("M"<<8)
+  TIMEZONE           = "T"+("Z"<<8)
+
 DAT
 SettingsLock  byte      -1
 OBJ
