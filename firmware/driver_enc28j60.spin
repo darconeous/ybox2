@@ -433,7 +433,7 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
 
   i:=0
 
-  delay_us(70) ' Too conservative...?
+  delay_us(60) ' Too conservative...?
 
   if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
     return 0
@@ -448,7 +448,7 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
   wr_reg(EWRPTH, crc_end >> 8)
   wr_reg(EWRPTL, crc_end)
 
-  crc-=$1600 ' WTF!?!?
+  'crc-=$1600 ' WTF!?!?
   
   wr_sram((crc>>8)) 
   wr_sram(crc) 
@@ -659,10 +659,12 @@ spi_out_                                                'SHIFTOUT Entry
               shr     t5,             #1                '          Shifting the number of bits left actually puts
                                                         '          us one more place to the left than we want. To
                                                         '          compensate we'll shift one position right.              
-:sout_loop    test    t3,             t5      wc        '          Test MSB of DataValue
+:sout_loop
+              test    t3,             t5      wc        '          Test MSB of DataValue
               muxc    outa,           dopin             '          Set DataBit HIGH or LOW
+              or    outa,           clkpin            '          Set ClockPin HIGH
               shr     t5,             #1                '          Prepare for next DataBit
-              call    #clock                            '          Send clock pulse
+              andn   outa,           clkpin            '          Set ClockPin LOW
               djnz    t4,             #:sout_loop       '          Decrement t4 ; jump if not Zero
               andn    outa,           dopin
               
@@ -674,23 +676,25 @@ spi_in_                                                 'SHIFTIN Entry
               mov     t4,             #SPIBITS          '     Load number of data bits
               andn    outa,           clkpin            '          PreSet ClockPin LOW
 
-:sin_loop     test    dipin,          ina     wc        '          Read Data Bit into 'C' flag
+:sin_loop
+              test    dipin,          ina     wc        '          Read Data Bit into 'C' flag
+              or    outa,           clkpin            '          Set ClockPin HIGH
               rcl     t3,             #1                '          rotate "C" flag into return value
-              call    #clock                            '          Send clock pulse
+              andn   outa,           clkpin            '          Set ClockPin LOW
               djnz    t4,             #:sin_loop        '          Decrement t4 ; jump if not Zero
 
               mov     arg0, t3
 spi_in__ret   ret                                       '     Go wait for next command
 
-clock
-              mov     clkpin,         #0      wz,nr     '     Clock Pin
-              muxz    outa,           clkpin            '          Set ClockPin HIGH
-              muxnz   outa,           clkpin            '          Set ClockPin LOW
-clock_ret     ret                                       '          return
+'clock
+'              mov     clkpin,         #0      wz,nr     '     Clock Pin
+'              muxz    outa,           clkpin            '          Set ClockPin HIGH
+'              muxnz   outa,           clkpin            '          Set ClockPin LOW
+'clock_ret     ret                                       '          return
 
 xspi_in_
               call #spi_in_
-              wrlong  arg0, addr
+              wrbyte  arg0, addr
 xspi_in__ret  ret
 
 ' SRAM Block Read/Write
@@ -698,14 +702,14 @@ sram_write_   ' block write (arg0=hub addr, arg1=count)
               mov t1, arg0
               mov t2, arg1
 
-:loop         andn outa, cspin
+              andn outa, cspin
               mov arg0, #cWBM
               call #spi_out_
-              rdbyte arg0, t1
+:loop         rdbyte arg0, t1
               call #spi_out_              
-              or outa, cspin
               add t1, #1
               djnz t2, #:loop
+              or outa, cspin
               
               jmp #loop
               
@@ -713,14 +717,14 @@ sram_read_    ' block read (arg0=hub addr, arg1=count)
               mov t1, arg0
               mov t2, arg1
               
-:loop         andn outa, cspin
+              andn outa, cspin
               mov arg0, #cRBM
               call #spi_out_
-              call #spi_in_
+:loop         call #spi_in_
               wrbyte arg0, t1
               add t1, #1
-              or outa, cspin
               djnz t2, #:loop
+              or outa, cspin
               
               jmp #loop
 

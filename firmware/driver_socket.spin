@@ -339,6 +339,9 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   bytemove(@seq, pkt + TCP_seqnum, 4)
   seq:=conv_endianlong(seq)
 
+  ' Update our notion of their current window size.
+  WORD[handle_addr+sDstWindow]:=BYTE[pkt][TCP_window] << 8 + BYTE[pkt][constant(TCP_window + 1)]
+  
   if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
     reject_tcp
     abort -1
@@ -545,10 +548,12 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       ' If we have hit out next ack marker, send an ACK
 
       i := local_mtu-TCP_DATA
-      ' TODO: If dest window is smaller than i, replace i with dest window size
+      if WORD[handle_addr+sDstWindow]<i
+        i:=WORD[handle_addr+sDstWindow]
       if i AND NOT q.isEmpty(BYTE[handle_addr+sSockQTx])
         i := q.pullData(BYTE[handle_addr+sSockQTx],pkt,i)
         send_tcppacket(handle_addr,TCP_ACK|TCP_PSH,pkt,i)
+        WORD[handle_addr+sDstWindow]-=i
       else
         i:=q.bytesFree(BYTE[handle_addr + sSockQRx])
         if i<MIN_ADVERTISED_WINDOW
@@ -866,18 +871,18 @@ CON
   sNumSockets = 2         ' number of sockets
 
 ' Offsets for socket status arrays
-  sMySeqNum = 0
-  sMyAckNum = 4
-  sSrcIp = 8
-  sAge = 12 
-  sSrcPort = 16
-  sDstPort = 18
-  sLastWindow = 24
-  sConState = 26
-  sSrcMac = 27
-
-  sSockQTx = 33
-  sSockQRx = 34
+  sMySeqNum = 0       ' long
+  sMyAckNum = 4       ' long
+  sSrcIp = 8          ' long
+  sAge = 12           ' long
+  sDstWindow = 16        ' word
+  sSrcPort = 16+4       ' word
+  sDstPort = 18+4       ' word
+  sLastWindow = 24+4    ' word
+  sSrcMac = 26+4        ' byte*6
+  sConState = 32+4      ' byte
+  sSockQTx = 33+4       ' byte
+  sSockQRx = 34+4       ' byte
 
 ' Socket states (user should never touch these)
   SCLOSED = 0                   ' closed, handle not used

@@ -282,9 +282,12 @@ pub WeatherCog | retrydelay,port,err
         subsys.StatusErrorCode(err)
       stat_errors++
       showMessage(string("Error!"))    
-      tel.closeall
+      tel.close
       if retrydelay < 60
          retrydelay+=retrydelay
+      else
+        tel.closeall
+        websocket.closeall
       delay_s(retrydelay)             ' failed to connect     
     if ++port > 30000
       port := 20000
