@@ -49,7 +49,7 @@ DAT
 productName   BYTE      "digital clock widget",0      
 productURL    BYTE      "http://www.ladyada.net/make/ybox2/",0
 
-info_refresh_period   long    30  ' in seconds
+info_refresh_period   long    60*60*12  ' in seconds
     
 PUB init | i
   dira[0]:=1 ' Set direction on reset pin
@@ -314,7 +314,7 @@ pub ClockCog | retrydelay,port,err, currtime, i
         if (alarming)
            Alarm
         else
-           delay_ms(900)
+          repeat while currtime == subsys.RTC + RTCoffset + ((settings.getByte(settings#TIMEZONE) + 24) * 1800)
       term.str(string($B,12))
       term.dec(subsys.RTC) ' Print out the RTC value
       term.out(" ")

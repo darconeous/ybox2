@@ -329,12 +329,6 @@ PRI initial_configuration | i
   settings.setData(settings#NET_MAC_ADDR,@stack,6)
 
   random.stop
-  
-  ' RGB LED Configuration
-  ' Original board = $000A0B09
-  ' Adafruit board = $010B0A09 (This is the default)
-  'settings.setLong(settings#MISC_LED_CONF,$010B0A09)
-  'settings.setLong(settings#MISC_LED_CONF,$000A0B09)
 
   settings.commit
   return TRUE
