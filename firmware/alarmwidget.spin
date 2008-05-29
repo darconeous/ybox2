@@ -222,15 +222,14 @@ PUB drawbigchar(charx, chary, bitmap)  | i, j
 
 CON
   CLOCK_SUCCESS = 860276
-pub Alarm | i, j
+pub Alarm | i
   dira[subsys#SPKRPin]:=1
-  repeat j from 0 to 10
-    repeat i from 0 to 30
-      outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
-      delay_ms(1)
-    outa[subsys#SPKRPin]:=0  
-    delay_ms(50)
-
+  repeat i from 0 to 30
+    outa[subsys#SPKRPin]:=!outa[subsys#SPKRPin]  
+    delay_ms(1)
+  outa[subsys#SPKRPin]:=0  
+  delay_ms(50)
+   
 pub fillscreen | i
   term.out(1)
   repeat i from 0 to 600
@@ -254,19 +253,21 @@ pub ClockCog | retrydelay,port,err, currtime, i
         'subsys.Click
         if ((settings.getByte(settings#TIMEZONE) < 0) or (settings.getByte(settings#TIMEZONE) > 49))
           settings.setByte(settings#TIMEZONE, 24)                 
-        currtime := subsys.RTC + RTCoffset + ((settings.getByte(settings#TIMEZONE) + 24) * 1800)
+        currtime := subsys.RTC + ((settings.getByte(settings#TIMEZONE) + 24) * 1800)
 
         sec := currtime // 60
         minute := (currtime/60) // 60
         hour := (currtime / 3600) // 24
 
         if alarming
-          if (sec // 2)
-            term.str(string($C, 6))
-            fillscreen
+          if (sec & 1)
+            term.setcolors(@paletteALARM)  
+            'term.str(string($C, 6))
+            'fillscreen
           else
-            term.str(string($C, 7))
-            term.out(0)
+            term.setcolors(@palette)  
+            'term.str(string($C, 7))
+            'term.out(0)
           
         drawbigchar(0, clk_y_off, @num0+(hour/10)*7)
         drawbigchar(6, clk_y_off, @num0+(hour//10)*7)
@@ -311,10 +312,10 @@ pub ClockCog | retrydelay,port,err, currtime, i
           term.dec(byte[@myip][i])
 
         
-        if (alarming)
-           Alarm
-        else
-          repeat while currtime == subsys.RTC + RTCoffset + ((settings.getByte(settings#TIMEZONE) + 24) * 1800)
+        repeat
+          if alarming
+            Alarm
+        while currtime == subsys.RTC + ((settings.getByte(settings#TIMEZONE) + 24) * 1800)
       term.str(string($B,12))
       term.dec(subsys.RTC) ' Print out the RTC value
       term.out(" ")
@@ -477,7 +478,9 @@ PUB parseDateline(str)  ' in form something like "Mon. dd, hh:mm:ss"
    'term.str(string("Sec : "))
    'term.dec(sec)
    'term.out(13)
-   RTCoffset := ((hour * 3600) + (minute * 60) + sec) - subsys.RTC
+   subsys.setRTC((hour * 3600) + (minute * 60) + sec)
+   RTCoffset:=0
+   'RTCoffset := ((hour * 3600) + (minute * 60) + sec) - subsys.RTC
         
 PUB strstrn(haystack, needle, len) | i, j   ' finds needle string in haystack string, up to len bytes long
    i := 0         ' string incrementer
@@ -601,7 +604,7 @@ pub addTextField(id,label,value,length)
   websocket.strxml(value)
   websocket.str(string("' /></div>"))
 
-pub httpServer | i, j, contentLength,authorized,queryPtr
+pub httpServer | i, j, contentLength,authorized,queryPtr,currentTime
   repeat
     repeat while websocket.listen(80) < 0
       if ina[subsys#BTTNPin]
@@ -664,34 +667,12 @@ pub httpServer | i, j, contentLength,authorized,queryPtr
           websocket.str(string("</tt></div>"))
 
         websocket.str(string("<div><tt>Time: "))
-        websocket.dec((subsys.RTC + RTCoffset)/3600)
-        websocket.tx("h")
-        websocket.dec(((subsys.RTC + RTCoffset)/60)//60)
-        websocket.tx("m")
-        websocket.dec((subsys.RTC + RTCoffset)//60)
-        websocket.tx("s")
-        websocket.str(string("</tt></div>"))
-        websocket.str(string("<div><tt>Refreshes: "))
-        websocket.dec(stat_refreshes)
-        websocket.str(string("</tt></div>"))        
-        websocket.str(string("<div><tt>Errors: "))
-        websocket.dec(stat_errors)
-        websocket.str(string("</tt></div>"))
-        websocket.str(string("<div><tt>Refresh Period: "))
-        websocket.dec(info_refresh_period)
-        websocket.str(string("s</tt></div>"))
-        websocket.str(string("<div><tt>INA: "))
-        repeat i from 0 to 7
-          websocket.dec(ina[i])
-        websocket.tx(" ")
-        repeat i from 8 to 15
-          websocket.dec(ina[i])
-        websocket.tx(" ")
-        repeat i from 16 to 23
-          websocket.dec(ina[i])
-        websocket.tx(" ")
-        repeat i from 23 to 31
-          websocket.dec(ina[i])          
+        currentTime:=subsys.RTC+((settings.getByte(settings#TIMEZONE) + 24) * 1800 )
+        websocket.dec(currentTime/3600//24)
+        websocket.tx(":")
+        websocket.dec((currentTime/60)//60)
+        websocket.tx(":")
+        websocket.dec(currentTime//60)
         websocket.str(string("</tt></div>"))
 
         websocket.str(string("<h2>Settings</h2>"))
@@ -830,6 +811,7 @@ pub httpServer | i, j, contentLength,authorized,queryPtr
     
     websocket.close
 DAT
+paletteALARM            byte    $BB,   $CE    '6      black, white
 palette                 byte    $07,   $B2    '0    white / dark blue
                         byte    $07,   $B2    '1    yellow / black
                         byte    $6B,   $B2    '2   yellow / brown
