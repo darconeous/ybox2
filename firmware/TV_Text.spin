@@ -44,6 +44,12 @@ OBJ
   tv : "tv"
 
 
+PUB getrow
+    return row
+    
+PUB getcol
+    return col
+
 PUB startWithMode(basepin,mode) : okay
 
 '' Start terminal - starts a cog
