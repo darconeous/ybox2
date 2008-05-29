@@ -613,6 +613,8 @@ init
               or      dira, clkpin
 
               or      outa, cspin                       'turn off cs (bring it high)
+              andn    outa,           dopin             '          PreSet DataPin LOW
+              andn    outa,           clkpin            '          PreSet ClockPin LOW
               
 loop          wrlong  zero,par                          'zero command (tell spin we are done processing)
 :subloop      rdlong  t1,par                    wz      'wait for command
@@ -650,20 +652,13 @@ loop          wrlong  zero,par                          'zero command (tell spin
 
 spi_out_                                                'SHIFTOUT Entry
               mov     t4,             #SPIBITS          '     Load number of data bits
-              andn    outa,           dopin             '          PreSet DataPin LOW
-              andn    outa,           clkpin            '          PreSet ClockPin LOW
 
               mov     t3,             arg0              '          Load t3 with DataValue
-              mov     t5,             #%1               '          Create MSB mask     ;     load t5 with "1"
-              shl     t5,             #SPIBITS          '          Shift "1" N number of bits to the left.
-              shr     t5,             #1                '          Shifting the number of bits left actually puts
-                                                        '          us one more place to the left than we want. To
-                                                        '          compensate we'll shift one position right.              
+              rol       t3, #(32-SPIBITS)
 :sout_loop
-              test    t3,             t5      wc        '          Test MSB of DataValue
+              rol       t3, #1 wc
               muxc    outa,           dopin             '          Set DataBit HIGH or LOW
               or    outa,           clkpin            '          Set ClockPin HIGH
-              shr     t5,             #1                '          Prepare for next DataBit
               andn   outa,           clkpin            '          Set ClockPin LOW
               djnz    t4,             #:sout_loop       '          Decrement t4 ; jump if not Zero
               andn    outa,           dopin
@@ -674,7 +669,7 @@ spi_out__ret  ret                                       '     Go wait for next c
 
 spi_in_                                                 'SHIFTIN Entry
               mov     t4,             #SPIBITS          '     Load number of data bits
-              andn    outa,           clkpin            '          PreSet ClockPin LOW
+'              andn    outa,           clkpin            '          PreSet ClockPin LOW
 
 :sin_loop
               test    dipin,          ina     wc        '          Read Data Bit into 'C' flag
@@ -685,12 +680,6 @@ spi_in_                                                 'SHIFTIN Entry
 
               mov     arg0, t3
 spi_in__ret   ret                                       '     Go wait for next command
-
-'clock
-'              mov     clkpin,         #0      wz,nr     '     Clock Pin
-'              muxz    outa,           clkpin            '          Set ClockPin HIGH
-'              muxnz   outa,           clkpin            '          Set ClockPin LOW
-'clock_ret     ret                                       '          return
 
 xspi_in_
               call #spi_in_
