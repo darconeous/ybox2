@@ -17,6 +17,7 @@ CON
   HASH_LENGTH =  16' hasher#HASH_LENGTH
   NONCE_LENGTH = 4 'In bytes
   RTCADDR = $8000-settings#SettingsSize-4
+  PASSWORD_MAX = 52
 DAT
 type byte "Digest",0
 realm byte "ybox2",0
@@ -87,7 +88,7 @@ pri getFieldWithKey(packeddataptr,keystring) | i,char
       i++  
   return 0
 
-pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGTH/4],response[HASH_LENGTH/4],nonce[NONCE_LENGTH/4],buffer[20]
+pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGTH/4],response[HASH_LENGTH/4],nonce[NONCE_LENGTH/4],buffer[PASSWORD_MAX/4]
   ' Skip past the word "Digest"
   repeat i from 0 to 5
     if byte[str][i]<>type[i]
@@ -103,7 +104,7 @@ pub authenticateResponse(str,method,uriPath) | i,H1[HASH_LENGTH/4],H2[HASH_LENGT
   hash_append(string("admin:"),6)
   hash_append(@realm,strsize(@realm))
   hash_append_byte(":")  
-  i:=settings.getData(settings#MISC_PASSWORD,@buffer,40)
+  i:=settings.getData(settings#MISC_PASSWORD,@buffer,PASSWORD_MAX)
   hash_append(@buffer,i)
   hash_finish
   bytemove(@H1,@hash_value,hasher#HASH_LENGTH)

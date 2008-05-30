@@ -439,7 +439,7 @@ CONFIG_PLIST_FILE         BYTE "/config.plist",0
 
 CON
   PASSWORD_MIN    = 3  
-  PASSWORD_MAX    = 50  
+  PASSWORD_MAX    = 52  
 
 pri httpUnauthorized(authorized)|challenge[20]
   websocket.str(@HTTP_VERSION)
@@ -470,7 +470,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
     repeat while NOT websocket.waitConnectTimeout(100)
       buttonCheck
       
-    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,@httpQuery)<0
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath)<0
       websocket.close
       next
 
@@ -599,16 +599,6 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           websocket.str(string("LED Configuration changed. (NEEDS REBOOT)",13,10))
         else        
           websocket.str(string("Invalid LED Configuration.",13,10))
-        {
-        if byte[queryPtr][0]=="1"
-          settings.setLong(settings#MISC_LED_CONF,$000A0B09)
-          settings.commit
-          websocket.str(string("ENABLED (NEEDS REBOOT)",13,10))
-        else
-          settings.removeKey(settings#MISC_LED_CONF)
-          settings.commit
-          websocket.str(string("DISABLED (NEEDS REBOOT)",13,10))
-         }
       elseif strcomp(@httpPath,string("/autoboot"))
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)
@@ -948,8 +938,8 @@ pub indexPage(authorized) | i
       beginForm(string("/password"),string("POST"))
 '      addTextField(string("username"),string("Username"),string("admin"),32)
       websocket.str(string("<div><small>Username is 'admin'.</small></div>"))
-      addPasswordField(string("pwd1"),string("Password"),0,32)
-      addPasswordField(string("pwd2"),string("Password (Repeat)"),0,32)
+      addPasswordField(string("pwd1"),string("Password"),0,PASSWORD_MAX)
+      addPasswordField(string("pwd2"),string("Password (Repeat)"),0,PASSWORD_MAX)
       addSubmitButton 
       endForm
      

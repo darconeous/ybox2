@@ -39,8 +39,8 @@ pub splitPathAndQuery(str)
 pub unescapeURLInPlace(in_ptr) | out_ptr,char,val
   out_ptr:=in_ptr
   repeat while (char:=byte[in_ptr++])
-    if char=="-"
-      ' Convert dashes to spaces for historical reasons
+    if char=="+"
+      ' Convert plus characters to spaces for historical reasons
       char:=" "
     if char=="%"
       case (char:=byte[in_ptr++])
@@ -62,6 +62,7 @@ pub unescapeURLInPlace(in_ptr) | out_ptr,char,val
   return TRUE
 pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen): count|char
 {{ NOTE: Doesn't support folded headers, as defined in RFC 822! }}
+  ' Leave room for the string termination.
   valueLen--
   nameLen--
   repeat while not tcp.isEOF(handle)
@@ -100,7 +101,7 @@ pub getNextHeader(handle,namePtr,nameLen,valuePtr,valueLen): count|char
     byte[namePtr]:=0
   if valuePtr
     byte[valuePtr]:=0
-pub parseRequest(handle,method,path,query) | i,char
+pub parseRequest(handle,method,path) | i,char
     i:=0
     repeat while ((char:=tcp.readByteTimeout(handle,TIMEOUT)) <> -1) AND (NOT tcp.isEOF(handle)) AND i<7
       BYTE[method][i]:=char
@@ -114,7 +115,9 @@ pub parseRequest(handle,method,path,query) | i,char
       if char == " " OR char == "#" ' OR char == "?" 
         quit
       i++
+    BYTE[path][i]:=0
 
+{
     if BYTE[path][i]=="?"
       ' If we stopped on a question mark, then grab the query
       BYTE[path][i]:=0
@@ -128,4 +131,4 @@ pub parseRequest(handle,method,path,query) | i,char
     else
       BYTE[path][i]:=0
       BYTE[query][0]:=0
-         
+}         

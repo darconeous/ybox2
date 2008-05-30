@@ -470,8 +470,10 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4], idx, 
             stat_refreshes++
             return WEATHER_SUCCESS
           abort 4
-        if ( (cnt-timeout) > (subsys#DISCONNECTTIMEOUT*clkfreq)) ' ~10 second timeout      
-          abort(subsys#ERR_DISCONNECTED)
+       if cnt-timeout>10*clkfreq ' 10 second timeout      
+         abort(subsys#ERR_DISCONNECTED)
+       'if ( (cnt-timeout) > (subsys#DISCONNECTTIMEOUT*clkfreq)) ' ~10 second timeout      
+       '   abort(subsys#ERR_DISCONNECTED)
   else
     abort(subsys#ERR_NO_CONNECT)
   return 5
@@ -632,7 +634,7 @@ pub httpServer | i, contentLength,authorized,queryPtr
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
     contentLength:=0
 
-    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,$8000)<0
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath)<0
       websocket.close
       next
         
@@ -769,6 +771,10 @@ pub httpServer | i, contentLength,authorized,queryPtr
           httpUnauthorized(authorized)
           websocket.close
           next
+        if strcomp(queryPtr,string("bootloader")) AND settings.findKey(settings#MISC_AUTOBOOT)
+          settings.revert
+          settings.removeKey(settings#MISC_AUTOBOOT)
+          settings.commit
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)

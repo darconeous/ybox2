@@ -44,7 +44,6 @@ VAR
   
   byte month, date, minute, hour, sec, alarming
 
-  long RTCoffset ' this is the offset we take off the RTC to get the current time! 
 DAT
 productName   BYTE      "digital clock widget",0      
 productURL    BYTE      "http://www.ladyada.net/make/ybox2/",0
@@ -95,12 +94,10 @@ PUB init | i
   if settings.findKey(settings#MISC_STAGE2)
     settings.removeKey(settings#MISC_STAGE2)
 
-  'ir.init(15, 0, 300, 1)
-         
-  'if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-  dira[subsys#SPKRPin]:=1
-  'else
-  '  dira[subsys#SPKRPin]:=0
+  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
+    dira[subsys#SPKRPin]:=1
+  else
+    dira[subsys#SPKRPin]:=0
 
   if NOT settings.findKey(settings#SERVER_PATH)
     if NOT \initial_configuration
@@ -172,9 +169,7 @@ PUB init | i
     term.str(@clockstack)
     term.str(string("'",13))
    
-  
   cognew(ClockCog, @clockstack) 
-
   
   repeat
     HappyChirp
@@ -195,12 +190,6 @@ PRI initial_configuration
   settings.setData(settings#SERVER_IPv4_ADDR,string(199,211,133,239),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/cgi-bin/timer.pl"))
-{
-  settings.setString(settings#SERVER_HOST,string("www.deepdarc.com"))  
-  settings.setData(settings#SERVER_IPv4_ADDR,string(69,73,181,158),4)
-  settings.setWord(settings#SERVER_IPv4_PORT,80)
-  settings.setString(settings#SERVER_PATH,string("/weather.php?zip=95008"))
-}
   return TRUE
  
 PUB drawbigchar(charx, chary, bitmap)  | i, j
@@ -262,12 +251,8 @@ pub ClockCog | retrydelay,port,err, currtime, i
         if alarming
           if (sec & 1)
             term.setcolors(@paletteALARM)  
-            'term.str(string($C, 6))
-            'fillscreen
           else
             term.setcolors(@palette)  
-            'term.str(string($C, 7))
-            'term.out(0)
           
         drawbigchar(0, clk_y_off, @num0+(hour/10)*7)
         drawbigchar(6, clk_y_off, @num0+(hour//10)*7)
@@ -292,9 +277,11 @@ pub ClockCog | retrydelay,port,err, currtime, i
            if ((settings.getByte(settings#ALARM_HOUR) == hour) and (settings.getByte(settings#ALARM_MIN) == minute))
               alarming := 1
            else
+{
               if (alarming)  
                 term.str(string($C, 7))
                 term.out(0)
+}
               alarming := 0
                 
         else
@@ -479,7 +466,7 @@ PUB parseDateline(str)  ' in form something like "Mon. dd, hh:mm:ss"
    'term.dec(sec)
    'term.out(13)
    subsys.setRTC((hour * 3600) + (minute * 60) + sec)
-   RTCoffset:=0
+   'RTCoffset:=0
    'RTCoffset := ((hour * 3600) + (minute * 60) + sec) - subsys.RTC
         
 PUB strstrn(haystack, needle, len) | i, j   ' finds needle string in haystack string, up to len bytes long
@@ -621,7 +608,7 @@ pub httpServer | i, j, contentLength,authorized,queryPtr,currentTime
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
     contentLength:=0
 
-    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath,$8000)<0
+    if \http.parseRequest(websocket.handle,@httpMethod,@httpPath)<0
       websocket.close
       next
         
@@ -795,6 +782,10 @@ pub httpServer | i, j, contentLength,authorized,queryPtr,currentTime
           httpUnauthorized(authorized)
           websocket.close
           next
+        if strcomp(queryPtr,string("bootloader")) AND settings.findKey(settings#MISC_AUTOBOOT)
+          settings.revert
+          settings.removeKey(settings#MISC_AUTOBOOT)
+          settings.commit
         websocket.str(@HTTP_200)
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)

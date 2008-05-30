@@ -334,19 +334,35 @@ PUB start_frame
 
 PUB wr_frame(data)
 '' Write frame data
-
-  wr_sram(data)
+  spi_out_cs(cWBM)
+  spi_out(data)
   ++tx_end
 PUB wr_frame_byte(data)
-  wr_frame(data)
+  spi_out_cs(cWBM)
+  spi_out(data)
+  ++tx_end
 PUB wr_frame_word(data)
+  spi_out_cs(cWBM)
+  spi_out_cs(byte[@data][1])
+  spi_out(byte[@data][0])
+  tx_end+=2
+  {
   wr_frame(byte[@data][1])
   wr_frame(byte[@data][0])
+  }
 PUB wr_frame_long(data)
+  spi_out_cs(cWBM)
+  spi_out_cs(byte[@data][3])
+  spi_out_cs(byte[@data][2])
+  spi_out_cs(byte[@data][1])
+  spi_out(byte[@data][0])
+  tx_end+=4
+{  
   wr_frame(byte[@data][3])
   wr_frame(byte[@data][2])
   wr_frame(byte[@data][1])
   wr_frame(byte[@data][0])
+}
 
 PUB wr_frame_data(data,len) | i
   wr_sram_block(data,len)
@@ -356,9 +372,16 @@ PUB wr_frame_data(data,len) | i
   '  wr_frame(byte[data][i])
 
 PUB wr_frame_pad(len)
+  spi_out_cs(cWBM)
+  repeat len-1
+    spi_out_cs(0)
+  spi_out(0)    
+  tx_end+=len
+
+  {
   repeat len
     wr_frame(0)
-
+  }
 PUB send_frame
 '' Sends frame
 '' Will retry on send failure up to 15 times with a 1ms delay in between repeats

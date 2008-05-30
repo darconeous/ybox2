@@ -57,6 +57,8 @@ PUB init | i
   settings.setData(settings#NET_IPv4_DNS,string(4,2,2,4),4)
   settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
   }
+
+  settings.removeKey(settings#MISC_STAGE2)
   
   subsys.init
 
@@ -191,7 +193,7 @@ pub httpServer | char, i, contentLength,authorized,queryPtr
     ' If there isn't a password set, then we are by default "authorized"
     authorized:=NOT settings.findKey(settings#MISC_PASSWORD)
     
-    http.parseRequest(socket.handle,@httpMethod,@httpPath,@httpQuery)
+    http.parseRequest(socket.handle,@httpMethod,@httpPath)
     
     contentLength:=0
     repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
@@ -225,6 +227,10 @@ pub httpServer | char, i, contentLength,authorized,queryPtr
           httpUnauthorized(authorized)
           socket.close
           next
+        if strcomp(queryPtr,string("bootloader")) AND settings.findKey(settings#MISC_AUTOBOOT)
+          settings.revert
+          settings.removeKey(settings#MISC_AUTOBOOT)
+          settings.commit
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.txmimeheader(string("Refresh"),string("12;url=/"))        

@@ -46,12 +46,12 @@ DAT
   cog         long 0                       
   
   pkt         long 0                  ' memory address of packet start
-  pkt_count   byte 0                  ' packet count
 
   pkt_id      long 0                  ' packet fragmentation id
   pkt_isn     long 0                  ' packet initial sequence number
 DAT
 
+tcp_send_pending BYTE   0
 last_listen_port WORD   0
 last_listen_time LONG   0
 
@@ -99,17 +99,16 @@ PUB stop
     cogstop(cog~ - 1)           ' stop the tcp engine
   nic.stop                    ' stop nic driver (kills spi engine)
 
-PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
+PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
   ' Start the ENC28J60 driver in a new cog
   nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic
     
   pkt := nic.get_packetpointer
 
-  i := 0
-  linkstat:=nic.isLinkUp
+  i~
 
-  if linkstat  
+  if nic.isLinkUp  
     dhcp_process
 
   repeat
@@ -118,17 +117,16 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i, linkstat
       dhcp_rebind
       
     nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
-    pkt_count := nic.rd_cntlreg(nic#EPKTCNT)
-    if pkt_count > 0
+    if nic.rd_cntlreg(nic#EPKTCNT) & $ff
       service_packet            ' handle packet
 
-    dhcp_process
-    ++i
+    if (i & 3) == 0
+      dhcp_process
     
-    if has_valid_ip_addr AND i > 1
-      ' perform send tick (occurs every 2 cycles, since incoming packets more important)
+    if tcp_send_pending OR ((i & 7) == 0)
+      ' perform send tick
+      tcp_send_pending~
       tick_tcpsend
-      i := 0
 
 PRI service_packet
   ' lets process this frame
@@ -476,7 +474,7 @@ PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,chksum)
   nic.wr_frame_byte(flags)
   nic.wr_frame_word(window)
   
-  chksum := (chksum >> 16) + (chksum & $FFFF)
+  chksum += (chksum >> 16)
   nic.wr_frame_word(chksum)  ' TCP checksum (work in progress)
   nic.wr_frame_word($00)  ' TCP urgent pointer
   
@@ -621,8 +619,8 @@ PRI arp_request_checkgateway(handle_addr) | ip_ptr
     arp_request(@ip_gateway)
     BYTE[handle_addr + sConState] := SCONNECTINGARP2G   
     LONG[handle_addr + sAge] := long[RTCADDR]
-  
-  
+  tcp_send_pending~~
+      
 ' *******************************
 ' ** IP Packet Helpers (Calcs) **
 ' *******************************    
@@ -743,6 +741,7 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   LONG[handle_addr + sAge] := long[RTCADDR]
 
   BYTE[handle_addr + sConState] := SCONNECTINGARP1
+  tcp_send_pending~~
   socketunlock
   
   return handle
@@ -754,6 +753,7 @@ PUB close(handle) | handle_addr
   if \isConnected(handle) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
+    tcp_send_pending~~
     repeat while BYTE[handle_addr + sConState]==SCLOSING
     \q.delete(BYTE[handle_addr + sSockQTx]~)
     \q.delete(BYTE[handle_addr + sSockQRx]~)
@@ -822,6 +822,8 @@ PUB writeByteNonBlocking(handle, txbyte):retVal | ptr
 
   if (retVal:=\q.push(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],txbyte)) < 0 AND retVal<>q#ERR_Q_FULL
     abort retVal  
+  if retVal>0
+    tcp_send_pending~~
 
 PUB writeDataNonBlocking(handle, ptr,len):retVal
 '' Writes a byte to the specified socket
@@ -829,7 +831,9 @@ PUB writeDataNonBlocking(handle, ptr,len):retVal
 
   if (retVal:=\q.pushData(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],ptr,len)) < 0 AND retVal<>q#ERR_Q_FULL
     abort retVal  
-
+  if retVal>0
+    tcp_send_pending~~
+  
 PUB writeByte(handle, txbyte):retVal
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
@@ -1263,9 +1267,12 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
             dhcp_offer_response
             ' Lets wait extra time
             ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
-            ' Had to comment out this return so DHCP would work properly
-            ' with internet sharing on the macosx. Not sure what is wrong.
-            'return
+            ' If our backoff delay is over 16 seconds,
+            ' then relax our need for an ACK. This
+            ' is a fix for the broken DHCP implementations
+            ' which don't send ACKs.
+            ifnot ip_dhcp_delay<16
+              return
           elseif byte[ptr+2]==DHCP_TYPE_NAK
             ' Nak'd!
             ip_dhcp_xid++
