@@ -79,20 +79,7 @@ DAT
 PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
 '' Starts the driver (uses 1 cog for spi engine)
 
-{
-  cs := i_cs
-  sck := i_sck
-  si := i_si
-  so := i_so
-}
   int := _int
-  
-{
-  dira[cs] := %1
-  dira[sck] := %1
-  dira[si] := %1
-  dira[so] := %0
-}
   dira[int] := %0
 
   spi_start(_cs, _sck, _so, _si)
@@ -292,14 +279,8 @@ PUB get_frame | packet_addr, new_rdptr
   wr_reg(ERDPTH, packetheader[nextpacket_high])
 
   rd_sram_block(@packetheader,6)
-  'repeat packet_addr from 0 to 5
-  '  packetheader[packet_addr] := rd_sram
 
   rxlen := (packetheader[rec_bytecnt_high] << 8) + packetheader[rec_bytecnt_low]
-
-  'bytefill(@packet, 0, MAXFRAME)                       ' Uncomment this if you want to clean out the buffer first
-                                                        '  otherwise, leave commented since it's faster to just leave stuff
-                                                        '  in the buffer
   
   ' protect from oversized packet
   if rxlen =< MAXFRAME
@@ -439,7 +420,7 @@ PUB calc_frame_udp_checksum
 '' to be in the checksum field.
   return calc_checksum(34,tx_end-TXSTART, 38)
  
-PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
+PUB calc_checksum(crc_start, crc_end, dest) | econval, crc
   crc_start += TXSTART+1
   crc_end += TXSTART
 
@@ -447,38 +428,34 @@ PUB calc_checksum(crc_start, crc_end, dest) | econval, i, crc
   wr_reg(EDMASTL, crc_start)
   wr_reg(EDMASTH, crc_start >> 8)
 
-  banksel(EDMANDL)
   wr_reg(EDMANDL, crc_end)
   wr_reg(EDMANDH, crc_end >> 8)
   
-  bfs_reg(ECON1, ECON1_CSUMEN)
-  bfs_reg(ECON1, ECON1_DMAST)
+  ' Wait for receive to finish, errata 15
+  repeat while ((rd_cntlreg(ESTAT) & constant(ESTAT_RXBUSY)))
+  
+  ' Enable and start checksum calculation
+  bfs_reg(ECON1, ECON1_CSUMEN|ECON1_DMAST)
 
-  i:=0
+  ' Wait for the DMA op to finish
+  repeat while ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
 
-  delay_us(60) ' Too conservative...?
-
-  if ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
-    return 0
   crc_end := dest + TXSTART +1
-
-  banksel(EDMACSL)
 
   crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
   
   ' Now we write out the checksum back to the device
-  banksel(EWRPTL)
   wr_reg(EWRPTH, crc_end >> 8)
   wr_reg(EWRPTL, crc_end)
 
-  'crc-=$1600 ' WTF!?!?
-  
   wr_sram((crc>>8)) 
   wr_sram(crc) 
   return 1
 
   
 PRI p_send_frame | i, eirval
+  'repeat while (rd_cntlreg(EIR) & constant(EIR_TXERIF | EIR_TXIF))
+
 ' Sends the frame
   banksel(ETXSTL)
   wr_reg(ETXSTL, TXSTART)
@@ -497,7 +474,7 @@ PRI p_send_frame | i, eirval
 
   ' trigger send
   bfs_reg(ECON1, ECON1_TXRTS)
-  
+
   ' fix for transmit stalls (derived from errata B5 #13), watches TXIF and TXERIF bits
   ' also implements a ~3.75ms (15 * 250us) timeout if send fails (occurs on random packet collisions)
   ' btw: this took over 10 hours to fix due to the elusive undocumented bug
