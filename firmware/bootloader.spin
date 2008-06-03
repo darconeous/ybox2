@@ -109,7 +109,7 @@ VAR
   byte hash[md5#HASH_LENGTH]
 DAT
 productName   BYTE      "ybox2 bootloader v"
-productVersion BYTE     "1.0",0      
+productVersion BYTE     "1.1a",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE     "http://ladyada.net/make/ybox2/",0
 
