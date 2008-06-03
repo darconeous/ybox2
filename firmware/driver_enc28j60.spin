@@ -29,8 +29,8 @@ CON
   version = 3     ' major version
   release = 2     ' minor version
 
-'OBJ
-'  spi : "SPI_Engine"
+OBJ
+  pause : "pause"
 
 CON
 ' ***************************************
@@ -41,15 +41,129 @@ CON
 
   ' ENC28J60 SRAM Usage Constants              
   MAXFRAME = 1518                               ' 6 (src addr) + 6 (dst addr) + 2 (type) + 1500 (data) + 4 (FCS CRC) = 1518 bytes
-  TX_BUFFER_SIZE = 1518
   
+  TX_BUFFER_SIZE = 1518
   TXSTART = 8192 - (TX_BUFFER_SIZE + 8)
   TXEND = TXSTART + (TX_BUFFER_SIZE + 8)
+CON
+  { Heap explanation:
+
+  The heap is 4KB large, and is broken down into 128 32byte pages.
+  A page can either be a part of an allocation or a part
+  of free space. The first byte of the first page of either
+  free space or an allocation contains metadata. It is of the
+  following format:
+
+   ┌─ Free/Alloc'd
+    ├─Span Size─┤   * NOTE: Span size is number of pages minus one! 
+  [7|6|5|4|3|2|1|0]
+
+  This byte is duplicated as the last byte of the last page
+  in an allocation or free space. This allows the heap to be
+  traversed in either direction.
+  
+  When an allocation is requested, the allocator will step thru
+  the spans one by one until it finds a free span which is
+  greater than or equal to the requested number of pages. If it
+  is greater, the span is split in two.
+
+  When an allocation is freed, the allocator will check to see
+  if either span in front of or behind it is free, and if so
+  it will merge with either (or both) span(s).
+  
+  }
+  HEAP_SIZE = 4096
+  HEAP_BEGIN = 8192 - HEAP_SIZE
+  HEAP_END = 8192 - 1
+  HEAP_PAGE_SIZE = 32
+
+  
+
   RXSTART = $0000
-  RXSTOP = (TXSTART - 2) | $0001                ' must be odd (B5 Errata)
+  RXSTOP = (HEAP_BEGIN - 2) | $0001                ' must be odd (B5 Errata)
   RXSIZE = (RXSTOP - RXSTART + 1)
 
-DAT
+{
+PUB heap_init
+  ' Write the leading byte
+  setSRAMWritePointer(HEAP_BEGIN)
+  wr_sram(constant(HEAP_SIZE/HEAP_PAGE_SIZE))
+   
+  ' Write the trailing byte
+  setSRAMWritePointer(HEAP_END)
+  wr_sram(constant(HEAP_SIZE/HEAP_PAGE_SIZE))
+
+PUB heap_alloc(size) | iter,info
+  iter:=HEAP_BEGIN
+  size:=(size+2)/HEAP_PAGE_SIZE
+  repeat while iter<HEAP_END
+    setSRAMReadPointer(iter)
+    info:=rd_sram
+    ifnot (info & constant(1<<7)) OR (info<size)
+      if info>size
+        ' We need to split first!
+        
+        ' Write the leading byte
+        setSRAMWritePointer(iter+(size+1)*HEAP_PAGE_SIZE)
+        wr_sram(info-size-1)
+
+        ' Write the trailing byte
+        setSRAMWritePointer(iter+info*HEAP_PAGE_SIZE+HEAP_PAGE_SIZE-1)
+        wr_sram(info-size-1)
+
+        info:=size  
+
+      ' Write the leading byte
+      setSRAMWritePointer(iter)
+      wr_sram(info|constant(1<<7))
+
+      ' Write the trailing byte
+      setSRAMWritePointer(iter+info*HEAP_PAGE_SIZE+HEAP_PAGE_SIZE-1)
+      wr_sram(info|constant(1<<7))
+      
+      return iter+1
+    iter+=((info&constant((1<<7)-1)+1)*HEAP_PAGE_SIZE)
+    
+  ' We couldn't find a suitable page!
+  abort -1
+       
+    
+PUB heap_free(eptr)| previnfo,info,nextinfo,nextaddr
+  eptr--
+  setSRAMReadPointer(eptr-1)
+  previnfo:=rd_sram
+  info:=rd_sram & !(1<<7)
+
+  ' Possibly merge with span before
+  if eptr<>HEAP_BEGIN
+    ifnot previnfo & constant(1<<7)
+      ' Previous span is free, so lets merge these two
+      previnfo++
+      eptr-=previnfo*HEAP_PAGE_SIZE
+      info+=previnfo
+
+  ' Possibly merge with span after
+  nextaddr:=eptr+info*HEAP_PAGE_SIZE+HEAP_PAGE_SIZE
+  if nextaddr<HEAP_END
+    setSRAMReadPointer(nextaddr)
+    nextinfo:=rd_sram
+    ifnot nextinfo & constant(1<<7)
+      info+=nextinfo+1
+
+  ' Write the leading byte
+  setSRAMWritePointer(eptr)
+  wr_sram(info)
+   
+  ' Write the trailing byte
+  setSRAMWritePointer(eptr+info*HEAP_PAGE_SIZE+HEAP_PAGE_SIZE-1)
+  wr_sram(info)
+}   
+     
+
+
+
+
+DAT                  
 ' ***************************************
 ' **    MAC Address Vars / Defaults    **
 ' ***************************************
@@ -69,9 +183,12 @@ DAT
 ' **         Global Variables          **
 ' ***************************************
  
-  packetheader    byte 0[6]
+  packetheader
+  ph_nextpacket   word 0
+  ph_rxlen        word 0
+  ph_rec_status   word 0
 
-  rxlen           word 0
+  'rxlen           word 0
   tx_end          word 0
         
   packet          byte 0[MAXFRAME]
@@ -80,7 +197,7 @@ PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
 '' Starts the driver (uses 1 cog for spi engine)
 
   int := _int
-  dira[int] := %0
+  dira[int]~
 
   spi_start(_cs, _sck, _so, _si)
 
@@ -97,8 +214,10 @@ PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
   if macptr > -1
     bytemove(@eth_mac, macptr, 6)
   
-  delay_ms(50)
+  pause.delay_ms(50)
   init_ENC28J60
+
+  'heap_init
 
   ' check to make sure its a valid supported silicon rev
   banksel(EREVID)
@@ -109,49 +228,216 @@ PUB stop
 
   spi_stop
 
-PUB rd_macreg(address) : data
+PUB rxPacketCount
+  banksel(EPKTCNT)  ' re-select the packet count bank
+  return rd_cntlreg(EPKTCNT)
+PUB isLinkUp
+  return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
+PUB get_frame | packet_addr, new_rdptr
+'' Get Ethernet Frame from Buffer
+
+  setSRAMReadPointer(ph_nextpacket)
+
+  rd_sram_block(@packetheader,6)
+
+  ' protect from oversized packet
+  if ph_rxlen =< MAXFRAME
+    rd_sram_block(@packet,ph_rxlen)
+     
+  new_rdptr := ph_nextpacket
+     
+  ' handle errata read pointer start (must be odd)
+  --new_rdptr
+       
+  if (new_rdptr < RXSTART) OR (new_rdptr > RXSTOP)
+    new_rdptr := RXSTOP
+
+  bfs_reg(ECON2, ECON2_PKTDEC)
+  
+  banksel(ERXRDPTL)
+  wr_reg_word(ERXRDPTL, new_rdptr)
+
+PUB start_frame
+'' Start frame - Inits the NIC and sets stuff
+
+  setSRAMWritePointer(TXSTART)
+
+  tx_end := constant(TXSTART - 1)         ' start location is really address 0, so we are sending a count of - 1
+
+  wr_frame(cTXCONTROL)
+
+PUB wr_frame(data)
+'' Write frame data
+  spi_out_cs(cWBM)
+  spi_out(data)
+  ++tx_end
+PUB wr_frame_byte(data)
+  spi_out_cs(cWBM)
+  spi_out(data)
+  ++tx_end
+PUB wr_frame_word(data)
+  spi_out_cs(cWBM)
+  spi_out_cs(byte[@data][1])
+  spi_out(byte[@data][0])
+  tx_end+=2
+
+PUB wr_frame_long(data)
+  spi_out_cs(cWBM)
+  spi_out_cs(byte[@data][3])
+  spi_out_cs(byte[@data][2])
+  spi_out_cs(byte[@data][1])
+  spi_out(byte[@data][0])
+  tx_end+=4
+
+PUB wr_frame_data(data,len) | i
+  wr_sram_block(data,len)
+  tx_end+=len
+
+PUB wr_frame_pad(len)
+  spi_out_cs(cWBM)
+  repeat len-1
+    spi_out_cs(0)
+  spi_out(0)    
+  tx_end+=len
+
+PUB send_frame
+'' Sends frame
+'' Will retry on send failure up to 15 times with a 1ms delay in between repeats
+
+  repeat 15
+    if p_send_frame             ' send packet, if successful then quit retry loop
+      quit          
+    pause.delay_ms(1)
+PUB calc_frame_ip_length : length
+  length:=tx_end-constant(TXSTART - 1)-14-1
+  setSRAMWritePointer(constant($10 + TXSTART +1))
+  wr_sram(length.byte[1]) 
+  wr_sram(length.byte[0]) 
+  
+PUB calc_frame_udp_length : length
+  length:=calc_frame_ip_length - 28
+  setSRAMWritePointer(constant($26 + TXSTART +1))
+  wr_sram(length.byte[1]) 
+  wr_sram(length.byte[0]) 
+  
+PUB calc_frame_ip_checksum
+  ' TODO: This needs to be able to handle different header sizes!
+  return calc_checksum(14,constant(14+20),constant(14+20-10))
+PUB calc_frame_icmp_checksum
+  return calc_checksum(34,tx_end-TXSTART, 36)
+
+PUB calc_frame_tcp_checksum
+'' For this to work, the partial checksum of the pseudo header needs
+'' to be in the checksum field.
+  return calc_checksum(34,tx_end-TXSTART, $32)
+
+PUB calc_frame_udp_checksum
+'' For this to work, the partial checksum of the pseudo header needs
+'' to be in the checksum field.
+  return calc_checksum(34,tx_end-TXSTART, 38)
+ 
+PUB calc_checksum(crc_start, crc_end, dest) | econval, crc
+  crc_start += constant(TXSTART+1)
+  crc_end += TXSTART
+
+  banksel(EDMASTL)
+  wr_reg_word(EDMASTL, crc_start)
+  wr_reg_word(EDMANDL, crc_end)
+  
+  ' Wait for receive to finish, errata 15
+  repeat while ((rd_cntlreg(ESTAT) & constant(ESTAT_RXBUSY)))
+  
+  ' Enable and start checksum calculation
+  bfs_reg(ECON1, ECON1_CSUMEN|ECON1_DMAST)
+
+  ' Wait for the DMA op to finish
+  repeat while ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
+
+  crc_end := dest + constant(TXSTART+1)
+
+  crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
+  
+  ' Now we write out the checksum back to the device
+  wr_reg_word(EWRPTL, crc_end)
+
+  wr_sram(crc.byte[1]) 
+  wr_sram(crc.byte[0]) 
+  return 1
+
+PUB get_packetpointer
+'' Gets packet pointer (for external object access)
+  return @packet
+
+PUB get_mac_pointer
+'' Gets mac address pointer
+  return @eth_mac
+
+PUB get_rxlen
+'' Gets received packet length
+  return ph_rxlen - 4             ' knock off the 4 byte Frame Check Sequence CRC, not used anywhere outside of this driver (pg 31 datasheet)
+
+PRI rd_macreg(address) : data
 '' Read MAC Control Register
 
   spi_out_cs(cRCR | address)
   spi_out_cs(0)                 ' transmit dummy byte
-  data := spi_in                ' get actual data
+  data.byte[0] := spi_in                ' get actual data
 
-PUB rd_cntlreg(address) : data
+PRI rd_macreg_word(address) : data
+'' Read MAC Control Register
+
+  spi_out_cs(cRCR | address)
+  spi_out_cs(0)                 ' transmit dummy byte
+  data.byte[0] := spi_in                ' get actual data
+
+  spi_out_cs(cRCR | address+1)
+  spi_out_cs(0)                 ' transmit dummy byte
+  data.byte[1] := spi_in                ' get actual data
+
+PRI rd_cntlreg(address) : data
 '' Read ETH Control Register
 
   spi_out_cs(cRCR | address)
-  data := spi_in
+  data.byte[0] := spi_in
 
-PUB wr_reg(address, data)
+PRI wr_reg(address, data)
 '' Write MAC and ETH Control Register
 
   spi_out_cs(cWCR | address)
   spi_out(data)
 
-PUB bfc_reg(address, data)
+PRI wr_reg_word(address, data)
+'' Write MAC and ETH Control Register
+
+  spi_out_cs(cWCR | address)
+  spi_out(data.byte[0])
+  spi_out_cs(cWCR | address+1)
+  spi_out(data.byte[1])
+
+PRI bfc_reg(address, data)
 '' Clear Control Register Bits
 
   spi_out_cs(cBFC | address)
   spi_out(data)
 
-PUB bfs_reg(address, data)
+PRI bfs_reg(address, data)
 '' Set Control Register Bits
 
   spi_out_cs(cBFS | address)
   spi_out(data)
 
-PUB soft_reset
+PRI soft_reset
 '' Soft Reset ENC28J60
 
   spi_out(cSC)
 
-PUB banksel(register)
+PRI banksel(register)
 '' Select Control Register Bank
 
   bfc_reg(ECON1, %0000_0011)
-  bfs_reg(ECON1, register >> 8)                         ' high byte
+  bfs_reg(ECON1, register.byte[1])                         ' high byte
 
-PUB rd_phy(register) | low, high
+PRI rd_phy(register): retVal
 '' Read ENC28J60 PHY Register
 
   banksel(MIREGADR)
@@ -161,42 +447,47 @@ PUB rd_phy(register) | low, high
   repeat while ((rd_macreg(MISTAT) & MISTAT_BUSY) > 0)
   banksel(MIREGADR)
   wr_reg(MICMD, $00)
-  low := rd_macreg(MIRDL)
-  high := rd_macreg(MIRDH)
-  return (high << 8) + low
+  retVal := rd_macreg_word(MIRDL)
 
-PUB wr_phy(register, data)
+PRI wr_phy(register, data)
 '' Write ENC28J60 PHY Register
 
   banksel(MIREGADR)
   wr_reg(MIREGADR, register)   
-  wr_reg(MIWRL, data)
-  wr_reg(MIWRH, data >> 8)
+  wr_reg_word(MIWRL,data)
   banksel(MISTAT)
   repeat while ((rd_macreg(MISTAT) & MISTAT_BUSY) > 0)
 
-PUB rd_sram : data
+PRI setSRAMReadPointer(x)
+  banksel(ERDPTL)
+  wr_reg_word(ERDPTL, x)
+  
+PRI setSRAMWritePointer(x)
+  banksel(EWRPTL)
+  wr_reg_word(EWRPTL, x)
+
+PRI rd_sram : data
 '' Read ENC28J60 8k Buffer Memory
 
   spi_out_cs(cRBM)
   data := spi_in
 
-PUB wr_sram(data)
+PRI wr_sram(data)
 '' Write ENC28J60 8k Buffer Memory
 
   spi_out_cs(cWBM)
   spi_out(data)
 
 
-PUB rd_sram_block(data_ptr,size)
+PRI rd_sram_block(data_ptr,size)
   'repeat size
   '  byte[data_ptr++]:=rd_sram
   blockread(data_ptr,size)
 
-PUB wr_sram_block(data_ptr,size)
+PRI wr_sram_block(data_ptr,size)
   blockwrite(data_ptr, size)
 
-PUB init_ENC28J60 | i
+PRI init_ENC28J60 | i
 '' Init ENC28J60 Chip
 
   repeat
@@ -204,7 +495,7 @@ PUB init_ENC28J60 | i
   while (i & $08) OR (!i & ESTAT_CLKRDY)
   
   soft_reset
-  delay_ms(5)                                           ' reset delay
+  pause.delay_ms(5)                                           ' reset delay
 
   bfc_reg(ECON1, ECON1_RXEN)                            ' stop send / recv
   bfc_reg(ECON1, ECON1_TXRTS)
@@ -215,18 +506,13 @@ PUB init_ENC28J60 | i
   packetheader[nextpacket_high] := constant(RXSTART >> 8)
 
   banksel(ERDPTL)
-  wr_reg(ERDPTL, RXSTART)
-  wr_reg(ERDPTH, constant(RXSTART >> 8))
+  wr_reg_word(ERDPTL, RXSTART)
 
   banksel(ERXSTL)
-  wr_reg(ERXSTL, RXSTART)
-  wr_reg(ERXSTH, constant(RXSTART >> 8))
-  wr_reg(ERXRDPTL, RXSTOP)
-  wr_reg(ERXRDPTH, constant(RXSTOP >> 8))
-  wr_reg(ERXNDL, RXSTOP)
-  wr_reg(ERXNDH, constant(RXSTOP >> 8))
-  wr_reg(ETXSTL, TXSTART)
-  wr_reg(ETXSTH, constant(TXSTART >> 8))
+  wr_reg_word(ERXSTL, RXSTART)
+  wr_reg_word(ERXRDPTL, RXSTOP)
+  wr_reg_word(ERXNDL, RXSTOP)
+  wr_reg_word(ETXSTL, TXSTART)
 
   banksel(MACON1)
   wr_reg(MACON1, constant(MACON1_TXPAUS | MACON1_RXPAUS | MACON1_MARXEN))
@@ -239,15 +525,12 @@ PUB init_ENC28J60 | i
   
   wr_reg(MAIPGL, $12)
   wr_reg(MAIPGH, $0C)
-  wr_reg(MAMXFLL, MAXFRAME)                     
-  wr_reg(MAMXFLH, constant(MAXFRAME >> 8))
+  wr_reg_word(MAMXFLL, MAXFRAME)                     
 
   ' back-to-back inter-packet gap time
   ' full duplex = 0x15 (9.6us)
   ' half duplex = 0x12 (9.6us)
   wr_reg(MABBIPG, $12)
-  wr_reg(MAIPGL, $12)
-  wr_reg(MAIPGH, $0C)
 
   ' write mac address to the chip
   banksel(MAADR1)
@@ -268,202 +551,15 @@ PUB init_ENC28J60 | i
   ' enable packet reception
   bfs_reg(ECON1, ECON1_RXEN)
 
-PUB isLinkUp
-  return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
-
-PUB get_frame | packet_addr, new_rdptr
-'' Get Ethernet Frame from Buffer
-
-  banksel(ERDPTL)
-  wr_reg(ERDPTL, packetheader[nextpacket_low])
-  wr_reg(ERDPTH, packetheader[nextpacket_high])
-
-  rd_sram_block(@packetheader,6)
-
-  rxlen := (packetheader[rec_bytecnt_high] << 8) + packetheader[rec_bytecnt_low]
-  
-  ' protect from oversized packet
-  if rxlen =< MAXFRAME
-    rd_sram_block(@packet,rxlen)
-'    repeat packet_addr from 0 to rxlen - 1
-'      BYTE[@packet][packet_addr] := rd_sram
-     
-  new_rdptr := (packetheader[nextpacket_high] << 8) + packetheader[nextpacket_low]
-     
-  ' handle errata read pointer start (must be odd)
-  --new_rdptr
-       
-  if (new_rdptr < RXSTART) OR (new_rdptr > RXSTOP)
-    new_rdptr := RXSTOP
-
-  bfs_reg(ECON2, ECON2_PKTDEC)
-  
-  banksel(ERXRDPTL)
-  wr_reg(ERXRDPTL, new_rdptr)
-  wr_reg(ERXRDPTH, new_rdptr >> 8)
-
-PUB start_frame
-'' Start frame - Inits the NIC and sets stuff
-
-  banksel(EWRPTL)
-  wr_reg(EWRPTL, TXSTART)
-  wr_reg(EWRPTH, constant(TXSTART >> 8))
-
-  tx_end := constant(TXSTART - 1)         ' start location is really address 0, so we are sending a count of - 1
-
-  wr_frame(cTXCONTROL)
-
-PUB wr_frame(data)
-'' Write frame data
-  spi_out_cs(cWBM)
-  spi_out(data)
-  ++tx_end
-PUB wr_frame_byte(data)
-  spi_out_cs(cWBM)
-  spi_out(data)
-  ++tx_end
-PUB wr_frame_word(data)
-  spi_out_cs(cWBM)
-  spi_out_cs(byte[@data][1])
-  spi_out(byte[@data][0])
-  tx_end+=2
-  {
-  wr_frame(byte[@data][1])
-  wr_frame(byte[@data][0])
-  }
-PUB wr_frame_long(data)
-  spi_out_cs(cWBM)
-  spi_out_cs(byte[@data][3])
-  spi_out_cs(byte[@data][2])
-  spi_out_cs(byte[@data][1])
-  spi_out(byte[@data][0])
-  tx_end+=4
-{  
-  wr_frame(byte[@data][3])
-  wr_frame(byte[@data][2])
-  wr_frame(byte[@data][1])
-  wr_frame(byte[@data][0])
-}
-
-PUB wr_frame_data(data,len) | i
-  wr_sram_block(data,len)
-  tx_end+=len
-
-  'repeat i from 0 to len-1
-  '  wr_frame(byte[data][i])
-
-PUB wr_frame_pad(len)
-  spi_out_cs(cWBM)
-  repeat len-1
-    spi_out_cs(0)
-  spi_out(0)    
-  tx_end+=len
-
-  {
-  repeat len
-    wr_frame(0)
-  }
-PUB send_frame
-'' Sends frame
-'' Will retry on send failure up to 15 times with a 1ms delay in between repeats
-
-  repeat 15
-    if p_send_frame             ' send packet, if successful then quit retry loop
-      quit          
-    delay_ms(1)
-PUB calc_frame_ip_length | length, ip_len
-  length:=tx_end-constant(TXSTART - 1)-14-1
-
-  ip_len := $10 + TXSTART +1
-
-  banksel(EWRPTL)
-  wr_reg(EWRPTL, ip_len)
-  wr_reg(EWRPTH, ip_len >> 8)
-  wr_sram(length>>8) 
-  wr_sram(length) 
-  return length
-  
-PUB calc_frame_udp_length | length, ip_len
-'  length:=tx_end-constant(TXSTART - 1)-14-1
-
-'  ip_len := $10 + TXSTART +1
-
-'  banksel(EWRPTL)
-'  wr_reg(EWRPTL, ip_len)
-'  wr_reg(EWRPTH, ip_len >> 8)
-'  wr_sram(length>>8) 
-'  wr_sram(length) 
-
-  ip_len := $26 + TXSTART +1
-  length:=calc_frame_ip_length - 28
-
-  banksel(EWRPTL)
-  wr_reg(EWRPTL, ip_len)
-  wr_reg(EWRPTH, ip_len >> 8)
-  wr_sram(length>>8) 
-  wr_sram(length) 
-  return length
-  
-PUB calc_frame_ip_checksum
-  ' TODO: This needs to be able to handle different header sizes!
-  return calc_checksum(14,14+20,14+20-10)
-PUB calc_frame_icmp_checksum
-  return calc_checksum(34,tx_end-TXSTART, 36)
-
-PUB calc_frame_tcp_checksum
-'' For this to work, the partial checksum of the pseudo header needs
-'' to be in the checksum field.
-  return calc_checksum(34,tx_end-TXSTART, $32)
-
-PUB calc_frame_udp_checksum
-'' For this to work, the partial checksum of the pseudo header needs
-'' to be in the checksum field.
-  return calc_checksum(34,tx_end-TXSTART, 38)
- 
-PUB calc_checksum(crc_start, crc_end, dest) | econval, crc
-  crc_start += TXSTART+1
-  crc_end += TXSTART
-
-  banksel(EDMASTL)
-  wr_reg(EDMASTL, crc_start)
-  wr_reg(EDMASTH, crc_start >> 8)
-
-  wr_reg(EDMANDL, crc_end)
-  wr_reg(EDMANDH, crc_end >> 8)
-  
-  ' Wait for receive to finish, errata 15
-  repeat while ((rd_cntlreg(ESTAT) & constant(ESTAT_RXBUSY)))
-  
-  ' Enable and start checksum calculation
-  bfs_reg(ECON1, ECON1_CSUMEN|ECON1_DMAST)
-
-  ' Wait for the DMA op to finish
-  repeat while ((rd_cntlreg(ECON1) & constant(ECON1_DMAST)))
-
-  crc_end := dest + TXSTART +1
-
-  crc := rd_cntlreg(EDMACSL) + (rd_cntlreg(EDMACSH) << 8)
-  
-  ' Now we write out the checksum back to the device
-  wr_reg(EWRPTH, crc_end >> 8)
-  wr_reg(EWRPTL, crc_end)
-
-  wr_sram((crc>>8)) 
-  wr_sram(crc) 
-  return 1
 
   
 PRI p_send_frame | i, eirval
-  'repeat while (rd_cntlreg(EIR) & constant(EIR_TXERIF | EIR_TXIF))
-
-' Sends the frame
+'' Sends the frame
   banksel(ETXSTL)
-  wr_reg(ETXSTL, TXSTART)
-  wr_reg(ETXSTH, constant(TXSTART >> 8))
+  wr_reg_word(ETXSTL, TXSTART)
 
   banksel(ETXNDL)
-  wr_reg(ETXNDL, tx_end)
-  wr_reg(ETXNDH, tx_end >> 8)
+  wr_reg_word(ETXNDL, tx_end)
 
   ' B5 Errata #10 - Reset transmit logic before send
   bfs_reg(ECON1, ECON1_TXRST)
@@ -486,33 +582,12 @@ PRI p_send_frame | i, eirval
     if (++i => 15)
       eirval := EIR_TXERIF
       quit
-    delay_us(250)
+    pause.delay_us(250)
 
   ' B5 Errata #13 - Reset TXRTS if failed send then reset logic
   bfc_reg(ECON1, ECON1_TXRTS)
   
-  if ((eirval & EIR_TXERIF) == 0)
-    return true   ' successful send (no error interrupt)
-  else
-    return false  ' failed send (error interrupt)
-
-PUB get_packetpointer
-'' Gets packet pointer (for external object access)
-  return @packet
-
-PUB get_mac_pointer
-'' Gets mac address pointer
-  return @eth_mac
-
-PUB get_rxlen
-'' Gets received packet length
-  return rxlen - 4             ' knock off the 4 byte Frame Check Sequence CRC, not used anywhere outside of this driver (pg 31 datasheet)
-
-PRI delay_us(Duration)
-  waitcnt(((clkfreq / 1_000_000 * Duration - 3928)) + cnt)
-  
-PRI delay_ms(Duration)
-  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
+  return ((eirval & EIR_TXERIF) == 0)
 
 PRI SynthFreq(Pin, Freq) | s, d, ctr, frq
 

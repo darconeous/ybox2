@@ -3,6 +3,20 @@
   ----------------------------- 
   Original code (c) 2007,2008 Harrison Pham.
   Modifications (c) 2008 Robert Quattlebaum.
+
+  Features:
+        * DHCP
+        * Ping (ICMP)
+        * TCP
+          * Full RX flow-control
+          * Partial TX flow-control
+
+  Limitations and bugs:
+        * Retransmission of TCP packets is not yet implemented.
+        * Incoming TCP packets are only accepted in order. Out
+          of order packets will be dropped. This will only
+          kill the connection if the sender refuses to retransmit.
+           
 }}
 
 OBJ
@@ -55,13 +69,6 @@ tcp_send_pending BYTE   0
 last_listen_port WORD   0
 last_listen_time LONG   0
 
-PUB init
-'  term.start(12)
-  settings.start
-'  subsys.init
-'  subsys.StatusLoading
-  start(1,2,3,4,6,7,-1,-1)
-  
 PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 '' Call this to launch the Telnet driver
 '' Only call this once, otherwise you will get conflicts
@@ -108,20 +115,16 @@ PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
 
   i~
 
-  if nic.isLinkUp  
-    dhcp_process
-
   repeat
     ifnot nic.isLinkUp
       repeat while NOT nic.isLinkUp
       dhcp_rebind
-      
-    nic.banksel(nic#EPKTCNT)  ' re-select the packet count bank
-    if nic.rd_cntlreg(nic#EPKTCNT) & $ff
-      service_packet            ' handle packet
 
     if (i & 3) == 0
       dhcp_process
+      
+    if nic.rxPacketCount
+      service_packet            ' handle packet
     
     if tcp_send_pending OR ((i & 7) == 0)
       ' perform send tick
@@ -162,13 +165,13 @@ PRI compose_ethernet_header(dst_macaddr,src_macaddr,size)
 PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
   nic.wr_frame($45)        ' ip vesion and header size
   nic.wr_frame($00)        ' TOS
-  nic.wr_frame_word($00)  ' IP Packet Length (Will be filled in at a later step)
+  nic.wr_frame_word($0000)  ' IP Packet Length (Will be filled in at a later step)
   nic.wr_frame_word(++pkt_id)
   nic.wr_frame($40)  ' Don't fragment
   nic.wr_frame($00)  ' frag stuff
   nic.wr_frame(ip_maxhops)  ' TTL
   nic.wr_frame(protocol)  ' UDP
-  nic.wr_frame_word($00)  ' header checksum (Filled in by hardware)
+  nic.wr_frame_word($0000)  ' header checksum (Filled in by hardware)
   nic.wr_frame_data(src_addr,4)
   nic.wr_frame_data(dst_addr,4)
 
@@ -177,7 +180,7 @@ PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
 PRI compose_udp_header(dst_port,src_port,chksum)
   nic.wr_frame_word(src_port)  ' Source Port
   nic.wr_frame_word(dst_port)  ' Dest Port
-  nic.wr_frame_word($00)  ' UDP packet Length (Will be filled in at a later step)
+  nic.wr_frame_word($0000)  ' UDP packet Length (Will be filled in at a later step)
   nic.wr_frame_word(chksum)  ' UDP checksum
 
 PRI compose_arp(type,lmac,lip,rmac,rip)
@@ -317,7 +320,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' Only let TCP work if the destination matches our address.
     abort -1
 
-  bytemove(@srcip, pkt + ip_srcaddr, 4)
+  wordmove(@srcip, pkt + ip_srcaddr, 2)
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -326,7 +329,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' port in the past 5 seconds then just drop the packet.
     ' Hopefully we'll be listening again on that port at
     ' some point in the near future.
-    ifnot dstport==last_listen_port AND LONG[RTCADDR]<last_listen_time+5 AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN)
+    ifnot (dstport==last_listen_port) AND (LONG[RTCADDR]<last_listen_time+5) AND ((BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN))
       reject_tcp
     abort -1
   handle_addr := @sSockets + (sSocketBytes * handle)
@@ -340,7 +343,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
   ' Update our notion of their current window size.
   WORD[handle_addr+sDstWindow]:=BYTE[pkt][TCP_window] << 8 + BYTE[pkt][constant(TCP_window + 1)]
   
-  if (BYTE[handle_addr + sConState] == SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
+  if (BYTE[handle_addr + sConState] == SLISTEN) AND NOT (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN) > 0
     reject_tcp
     abort -1
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_ACK) > 0 AND datain_len > 0
@@ -1120,10 +1123,13 @@ PRI send_dhcp_request | i, pkt_len
   compose_bootp(1,0,ip_dhcp_xid,ip_dhcp_delay,@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
    
   ' DHCP Magic Cookie
+  nic.wr_frame_data(@DHCP_MAGIC_COOKIE,4)
+{
   nic.wr_frame($63)
   nic.wr_frame($82)
   nic.wr_frame($53)
   nic.wr_frame($63)
+}
 
   ' DHCP Message Type
   nic.wr_frame(53)
@@ -1131,6 +1137,8 @@ PRI send_dhcp_request | i, pkt_len
   nic.wr_frame(DHCP_TYPE_DISCOVER)
 
   ' DHCP Parameter Request List
+  nic.wr_frame_data(@DHCP_PARAM_REQUEST,DHCP_PARAM_REQUEST[1]+2)
+{
   nic.wr_frame(55)
   nic.wr_frame(5) ' 5 bytes long
   nic.wr_frame(1) ' subnet mask
@@ -1138,6 +1146,7 @@ PRI send_dhcp_request | i, pkt_len
   nic.wr_frame(6) ' DNS server
   nic.wr_frame(23) ' IP maxhops
   nic.wr_frame(51) ' lease time
+}
 
   ' DHCP Client-ID
   nic.wr_frame(61)
@@ -1158,7 +1167,10 @@ PRI send_dhcp_request | i, pkt_len
   'nic.calc_frame_udp_checksum
   return nic.send_frame
 
-  
+DAT
+DHCP_MAGIC_COOKIE BYTE $63,$82,$53,$63
+DHCP_PARAM_REQUEST BYTE 55,5,1,3,6,23,51
+ 
 PRI dhcp_offer_response | i, ptr         
   nic.start_frame
 
@@ -1171,10 +1183,13 @@ PRI dhcp_offer_response | i, ptr
   compose_bootp($01,byte[pkt+DHCP_hops],ip_dhcp_xid,conv_endianword(word[pkt+DHCP_secs]),@any_ipaddr,@any_ipaddr,@any_ipaddr,@any_ipaddr)
   
   ' DHCP Magic Cookie
+  nic.wr_frame_data(@DHCP_MAGIC_COOKIE,4)
+{
   nic.wr_frame($63)
   nic.wr_frame($82)
   nic.wr_frame($53)
   nic.wr_frame($63)
+}
 
   ' DHCP Message Type
   nic.wr_frame(53)
@@ -1182,6 +1197,8 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame(DHCP_TYPE_REQUEST)
 
   ' DHCP Parameter Request List
+  nic.wr_frame_data(@DHCP_PARAM_REQUEST,DHCP_PARAM_REQUEST[1]+2)
+{
   nic.wr_frame(55)
   nic.wr_frame(5) ' 5 bytes long
   nic.wr_frame(1) ' subnet mask
@@ -1189,6 +1206,7 @@ PRI dhcp_offer_response | i, ptr
   nic.wr_frame(6) ' DNS server
   nic.wr_frame(23) ' IP maxhops
   nic.wr_frame(51) ' lease time
+}
 
   ' DHCP Client-ID
   nic.wr_frame(61)

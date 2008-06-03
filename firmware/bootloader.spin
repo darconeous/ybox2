@@ -126,15 +126,16 @@ PUB init | i, tv_mode
   ' Set the direction on the sound pin depending
   ' on if we are muted or not.
   if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-    dira[subsys#SPKRPin]:=1
+    dira[subsys#SPKRPin]~~
   else
-    dira[subsys#SPKRPin]:=0
+    dira[subsys#SPKRPin]~
 
   ' If we are in the second stage of a bootloader upgrade,
   ' then we need set the appropriate variable.
   if settings.findKey(settings#MISC_STAGE2)
     stage_two := TRUE
     settings.removeKey(settings#MISC_STAGE2)
+    settings.removeKey(settings#MISC_AUTOBOOT)
   else
     stage_two := FALSE
 
@@ -599,6 +600,31 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           websocket.str(string("LED Configuration changed. (NEEDS REBOOT)",13,10))
         else        
           websocket.str(string("Invalid LED Configuration.",13,10))
+      elseif strcomp(@httpPath,string("/mute"))
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
+          websocket.close
+          next
+        websocket.str(@HTTP_VERSION)
+        websocket.str(@HTTP_303)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.txmimeheader(@HTTP_HEADER_LOCATION,string("/"))        
+        websocket.str(@CR_LF)
+        case byte[queryPtr]
+          "1": i~~
+          "0": i~
+          other: i:=NOT settings.findKey(settings#MISC_SOUND_DISABLE)
+        if i
+          settings.setByte(settings#MISC_SOUND_DISABLE,1)
+          settings.commit
+          websocket.str(string("MUTED",13,10))
+          dira[subsys#SPKRPin]~
+        else
+          settings.removeKey(settings#MISC_SOUND_DISABLE)
+          settings.commit
+          websocket.str(string("UNMUTED",13,10))
+          dira[subsys#SPKRPin]~~
+        subsys.click
       elseif strcomp(@httpPath,string("/autoboot"))
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)

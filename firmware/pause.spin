@@ -1,6 +1,6 @@
 CON
   _clkmode = xtal1 + pll16x
-  _xinfreq = 5_000_000                                                      
+  _clkfreq = 80_000_000                                                      
   cntMin     = 400
 DAT
 us  long _CLKFREQ/1_000_000
