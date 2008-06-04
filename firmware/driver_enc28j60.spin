@@ -80,7 +80,8 @@ CON
   
 
   RXSTART = $0000
-  RXSTOP = (HEAP_BEGIN - 2) | $0001                ' must be odd (B5 Errata)
+  RXSTOP = (TXSTART - 2) | $0001                ' must be odd (B5 Errata)
+'  RXSTOP = (HEAP_BEGIN - 2) | $0001                ' must be odd (B5 Errata)
   RXSIZE = (RXSTOP - RXSTART + 1)
 
 {
