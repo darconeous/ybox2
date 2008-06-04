@@ -69,12 +69,8 @@ tcp_send_pending BYTE   0
 last_listen_port WORD   0
 last_listen_time LONG   0
 
-PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
+PUB start(cs, sck, si, so, int, xtalout) : okay
 '' Call this to launch the Telnet driver
-'' Only call this once, otherwise you will get conflicts
-'' macptr      = HUB memory pointer (address) to 6 contiguous mac address bytes
-'' ipconfigptr = HUB memory pointer (address) to ip configuration block (20 bytes)
-''               Must be in order: ip_addr. ip_subnet, ip_gateway, ip_dns
 
   stop
   q.init
@@ -97,16 +93,18 @@ PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) : okay
 
   dhcp_init
 
-  cog := cognew(engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr), @stack) + 1
+  cog := cognew(engine(cs, sck, si, so, int, xtalout), @stack) + 1
   return cog
     
 PUB stop
 '' Stop the driver
   if cog
     cogstop(cog~ - 1)           ' stop the tcp engine
+  if SocketLockID>-1
+    lockret(SocketLockID~~)
   nic.stop                    ' stop nic driver (kills spi engine)
 
-PRI engine(cs, sck, si, so, int, xtalout, macptr, ipconfigptr) | i
+PRI engine(cs, sck, si, so, int, xtalout) | i
 
   ' Start the ENC28J60 driver in a new cog
   nic.start(cs, sck, si, so, int, xtalout, @local_macaddr)                    ' init the nic

@@ -108,7 +108,7 @@ PUB init | i
       reboot
   
   outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
-  if not \tel.start(1,2,3,4,6,7,-1,-1)
+  if not \tel.start(1,2,3,4,6,7)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     SadChirp

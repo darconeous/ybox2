@@ -165,20 +165,9 @@ PUB heap_free(eptr)| previnfo,info,nextinfo,nextaddr
 
 
 DAT                  
-' ***************************************
-' **    MAC Address Vars / Defaults    **
-' ***************************************
-  ' ** This is the default MAC address used by this driver.  The parent object
-  '    can override this by passing a pointer to a new MAC address in the public
-  '    start() method.  It is recommend that this is done to provide a level of
-  '    abstraction and makes tcp stack design easier.
-  ' ** This is the ethernet MAC address, it is critical that you change this
-  '    if you have more than one device using this code on a local network.
-  ' ** If you plan on commercial deployment, you must purchase MAC address
-  '    groups from IEEE or some other standards organization.
   int             long 0 ' For allignment
 
-  eth_mac         byte    $10, $00, $00, $00, $00, $01
+  'eth_mac         byte    $02, $00, $00, $00, $00, $01
 
 ' ***************************************
 ' **         Global Variables          **
@@ -189,7 +178,6 @@ DAT
   ph_rxlen        word 0
   ph_rec_status   word 0
 
-  'rxlen           word 0
   tx_end          word 0
         
   packet          byte 0[MAXFRAME]
@@ -210,31 +198,46 @@ PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
   if xtalout > -1
     SynthFreq(xtalout, 25_000_000)      'determine ctr and frq for xtalout
 
-  ' If a MAC address pointer is provided (addr > -1) then copy it into
-  ' the MAC address array (this kind of wastes space, but simplifies usage).
-  if macptr > -1
-    bytemove(@eth_mac, macptr, 6)
-  
   pause.delay_ms(50)
   init_ENC28J60
+
+  ' write mac address to the chip
+  setMACAddress(macptr)
 
   'heap_init
 
   ' check to make sure its a valid supported silicon rev
-  banksel(EREVID)
-  return rd_cntlreg(EREVID) => silicon_rev      ' return true if silicon rev match
+  return hwVersion => silicon_rev
 
 PUB stop
 '' Stops the driver, frees 1 cog
 
   spi_stop
-
+PUB hwVersion
+  banksel(EREVID)
+  return rd_cntlreg(EREVID)
+PUB setMACAddress(macptr)
+  ' write mac address to the chip
+  banksel(MAADR1)
+{
+  spi_out_cs(constant(cWCR | MAADR1))
+  repeat 5
+    spi_out_cs(byte[macptr++])
+  spi_out(byte[macptr++])
+}
+  wr_reg(MAADR1,byte[macptr++])
+  wr_reg(MAADR2,byte[macptr++])
+  wr_reg(MAADR3,byte[macptr++])
+  wr_reg(MAADR4,byte[macptr++])
+  wr_reg(MAADR5,byte[macptr++])
+  wr_reg(MAADR6,byte[macptr++])
+  
 PUB rxPacketCount
   banksel(EPKTCNT)  ' re-select the packet count bank
   return rd_cntlreg(EPKTCNT)
 PUB isLinkUp
   return rd_phy(PHSTAT2)&PHSTAT2_LSTAT <>0
-PUB get_frame | packet_addr, new_rdptr
+PUB get_frame | new_rdptr
 '' Get Ethernet Frame from Buffer
 
   setSRAMReadPointer(ph_nextpacket)
@@ -364,10 +367,11 @@ PUB get_packetpointer
 '' Gets packet pointer (for external object access)
   return @packet
 
+{
 PUB get_mac_pointer
 '' Gets mac address pointer
   return @eth_mac
-
+}
 PUB get_rxlen
 '' Gets received packet length
   return ph_rxlen - 4             ' knock off the 4 byte Frame Check Sequence CRC, not used anywhere outside of this driver (pg 31 datasheet)
@@ -405,8 +409,11 @@ PRI wr_reg(address, data)
 PRI wr_reg_word(address, data)
 '' Write MAC and ETH Control Register
 
+  spi_out_cs(cWCR | address++)
+  spi_out(data.byte[0])
+
   spi_out_cs(cWCR | address)
-  spi_out_cs(data.byte[0])
+  'spi_out_cs(data.byte[0])
   spi_out(data.byte[1])
 
 PRI bfc_reg(address, data)
@@ -482,10 +489,14 @@ PRI rd_sram_block(data_ptr,size)
 PRI wr_sram_block(data_ptr,size)
   blockwrite(data_ptr, size)
 
-PRI init_ENC28J60 | i
+PRI init_ENC28J60 | starttime,i
 '' Init ENC28J60 Chip
 
+  starttime:=cnt
   repeat
+    if cnt-starttime>clkfreq
+      ' Timeout!
+      abort 0
     i := rd_cntlreg(ESTAT)
   while (i & $08) OR (!i & ESTAT_CLKRDY)
   
@@ -526,15 +537,6 @@ PRI init_ENC28J60 | i
   ' full duplex = 0x15 (9.6us)
   ' half duplex = 0x12 (9.6us)
   wr_reg(MABBIPG, $12)
-
-  ' write mac address to the chip
-  banksel(MAADR1)
-  wr_reg(MAADR1, eth_mac[0])
-  wr_reg(MAADR2, eth_mac[1])
-  wr_reg(MAADR3, eth_mac[2])
-  wr_reg(MAADR4, eth_mac[3])
-  wr_reg(MAADR5, eth_mac[4])
-  wr_reg(MAADR6, eth_mac[5])
 
   ' half duplex 
   wr_phy(PHCON2, PHCON2_HDLDIS)

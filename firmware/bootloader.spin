@@ -205,7 +205,7 @@ PUB init | i, tv_mode
       reboot
 
   outa[0]~~ ' Pull ethernet reset pin high, ending the reset condition.
-  if not \websocket.start(1,2,3,4,6,7,-1,-1)
+  if not \websocket.start(1,2,3,4,6,7)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     subsys.chirpSad

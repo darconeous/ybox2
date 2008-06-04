@@ -95,7 +95,7 @@ PUB init | i
   dira[subsys#SPKRPin]:=!settings.findKey(settings#MISC_SOUND_DISABLE)
   
   dira[0]:=0
-  if not \socket.start(1,2,3,4,6,7,-1,-1)
+  if not \socket.start(1,2,3,4,6,7)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
     subsys.chirpSad

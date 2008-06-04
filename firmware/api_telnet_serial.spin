@@ -7,9 +7,9 @@ VAR
   word listenport
   byte listening
 
-PUB start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
+PUB start(cs, sck, si, so, int, xtalout)
   _handle:=-1
-  return tcp.start(cs, sck, si, so, int, xtalout, macptr, ipconfigptr)
+  return tcp.start(cs, sck, si, so, int, xtalout)
 
 PUB stop
 
