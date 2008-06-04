@@ -47,9 +47,9 @@ productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
   info_refresh_period   long    30  ' in seconds
     
 PUB init | i
-  dira[0]:=1 ' Set direction on reset pin
-  outa[0]:=0 ' Set state on reset pin to LOW
-  dira[subsys#SPKRPin]:=1
+  dira[0]~~ ' Set direction on reset pin
+  outa[0]~ ' Set state on reset pin to LOW
+  dira[subsys#SPKRPin]~~
 
   stat_refreshes:=0
   stat_errors:=0
@@ -91,10 +91,7 @@ PUB init | i
 
   'ir.init(15, 0, 300, 1)
          
-  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-    dira[subsys#SPKRPin]:=1
-  else
-    dira[subsys#SPKRPin]:=0
+  dira[subsys#SPKRPin]:=!settings.findKey(settings#MISC_SOUND_DISABLE)
 
   if NOT settings.findKey(settings#SERVER_PATH)
     if NOT \initial_configuration
@@ -104,7 +101,7 @@ PUB init | i
       waitcnt(clkfreq*100000 + cnt)
       reboot
   
-  outa[0]:=1 ' Pull ethernet reset pin high, ending the reset condition.
+  outa[0]~~ ' Pull ethernet reset pin high, ending the reset condition.
   if not \tel.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError

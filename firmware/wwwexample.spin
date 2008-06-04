@@ -92,13 +92,9 @@ PUB init | i
       term.hex(byte[@stack][i],2)
     term.out(13)  
 
-  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-    dira[subsys#SPKRPin]:=1
-  else
-    dira[subsys#SPKRPin]:=0
+  dira[subsys#SPKRPin]:=!settings.findKey(settings#MISC_SOUND_DISABLE)
   
   dira[0]:=0
-
   if not \socket.start(1,2,3,4,6,7,-1,-1)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError

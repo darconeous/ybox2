@@ -264,13 +264,8 @@ PUB start_frame
 
   tx_end := constant(TXSTART - 1)         ' start location is really address 0, so we are sending a count of - 1
 
-  wr_frame(cTXCONTROL)
+  wr_frame_byte(cTXCONTROL)
 
-PUB wr_frame(data)
-'' Write frame data
-  spi_out_cs(cWBM)
-  spi_out(data)
-  ++tx_end
 PUB wr_frame_byte(data)
   spi_out_cs(cWBM)
   spi_out(data)
@@ -410,8 +405,7 @@ PRI wr_reg_word(address, data)
 '' Write MAC and ETH Control Register
 
   spi_out_cs(cWCR | address)
-  spi_out(data.byte[0])
-  spi_out_cs(cWCR | address+1)
+  spi_out_cs(data.byte[0])
   spi_out(data.byte[1])
 
 PRI bfc_reg(address, data)
@@ -627,8 +621,8 @@ PRI fraction(a, b, shift) : f
 ' **          ASM SPI Engine           **
 ' ***************************************   
 DAT
-  cog         long 0
-  command     long 0
+cog     long 0
+command long 0
   
 CON
   SPIOUT        = %00_0001
@@ -646,13 +640,11 @@ PRI spi_out(value)
 PRI spi_out_cs(value)
   setcommand(constant(SPIOUT | CSON), @value)
 
-PRI spi_in | value
+PRI spi_in : value
   setcommand(constant(SPIIN | CSON | CSOFF), @value)
-  return value
   
-PRI spi_in_cs | value
+PRI spi_in_cs : value
   setcommand(constant(SPIIN | CSON), @value)
-  return value
 
 PRI blockwrite(startaddr, count)
   setcommand(SRAMWRITE, @startaddr)

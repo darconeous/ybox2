@@ -55,7 +55,7 @@ OBJ
 VAR
   long stack[20] 'Stack space for new cog
 PUB init | LED_Conf
-  if settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
+  if \settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
     ' We have custom LED settings!
     ' Update the LED masks
     LEDBMask:=1<<((LED_Conf>>16)&%11111)
@@ -77,21 +77,18 @@ PUB init | LED_Conf
   LONG[BOOTTIMEADDR]~
          
   subsyscog := cognew(@run, @LED_R)+1 
-  StatusIdle
+'  StatusIdle
 
 PUB Stop
   if subsyscog
     cogstop(subsyscog~ - 1)
-    subsyscog:=0
   StatusOff
   if modecog
     cogstop(modecog~ - 1)
-    modecog:=0
 PUB StatusOff
-  lasterror:=0
+  lasterror~
   if modecog
     cogstop(modecog~ - 1)
-    modecog:=0
 PUB irTest
   StatusOff
   modecog := cognew(irTestCycle, @stack) + 1 
@@ -115,11 +112,10 @@ PUB StatusFatalError
   StatusOff
   modecog := cognew(ErrorCycle, @stack) + 1 
 PUB StatusErrorCode(i)
-  if lasterror == i
-    return
-  StatusOff
-  lasterror := i
-  modecog := cognew(ErrorCodeCycle(i), @stack) + 1
+  if lasterror <> i
+    StatusOff
+    lasterror := i
+    modecog := cognew(ErrorCodeCycle(i), @stack) + 1
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
@@ -214,13 +210,14 @@ run
               or dira,LEDRMask
               or dira,LEDGMask
               or dira,LEDBMask
-              or dira,SPKRMask
+              'or dira,SPKRMask
 
-
+{
               ' Set up CTRA for the button watchdog.
               mov phsa,#0
               mov ctra,RSTCTR
               mov frqa,RSTFRQ
+}
 
               ' Set up RTCLAST for RTC
               rdlong RTCLAST,#0
@@ -228,6 +225,7 @@ run
               
 loop
 
+{
               ' If the button was released,
               ' reset the phase register.
               mov  T1,#1
@@ -240,7 +238,7 @@ loop
               ' than 5 seconds, then reset the board.
               cmp  RSTTIME,phsa wc
         if_c  clkset RSTCLK
-
+}
 
 LEDDutyLoop
 
@@ -288,6 +286,8 @@ LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
               rdlong T1,RTCPTR
               add T1,#1
               wrlong T1,RTCPTR
+
+
               jmp #loop
               
 

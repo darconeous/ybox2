@@ -163,14 +163,14 @@ PRI compose_ethernet_header(dst_macaddr,src_macaddr,size)
   nic.wr_frame_data(src_macaddr,6)
   nic.wr_frame_word(size)
 PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
-  nic.wr_frame($45)        ' ip vesion and header size
-  nic.wr_frame($00)        ' TOS
+  nic.wr_frame_byte($45)        ' ip vesion and header size
+  nic.wr_frame_byte($00)        ' TOS
   nic.wr_frame_word($0000)  ' IP Packet Length (Will be filled in at a later step)
   nic.wr_frame_word(++pkt_id)
-  nic.wr_frame($40)  ' Don't fragment
-  nic.wr_frame($00)  ' frag stuff
-  nic.wr_frame(ip_maxhops)  ' TTL
-  nic.wr_frame(protocol)  ' UDP
+  nic.wr_frame_byte($40)  ' Don't fragment
+  nic.wr_frame_byte($00)  ' frag stuff
+  nic.wr_frame_byte(ip_maxhops)  ' TTL
+  nic.wr_frame_byte(protocol)  ' UDP
   nic.wr_frame_word($0000)  ' header checksum (Filled in by hardware)
   nic.wr_frame_data(src_addr,4)
   nic.wr_frame_data(dst_addr,4)
@@ -188,8 +188,8 @@ PRI compose_arp(type,lmac,lip,rmac,rip)
 
   nic.wr_frame_word($0800)             ' ip proto
 
-  nic.wr_frame($06)             ' mac addr len
-  nic.wr_frame($04)             ' proto addr len
+  nic.wr_frame_byte($06)             ' mac addr len
+  nic.wr_frame_byte($04)             ' proto addr len
 
   nic.wr_frame_word(type)       'type
 
@@ -747,7 +747,7 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   tcp_send_pending~~
   socketunlock
   
-  return handle
+  return handle          
 
 PUB close(handle) | handle_addr
 '' Closes a connection
@@ -851,10 +851,10 @@ PRI writeData_(handle, ptr,len): retVal
       abort -1
 
 PUB writeData(handle, ptr,len)
-  repeat while len > q#Q_SIZE-1
-    writeData_(handle,ptr,q#Q_SIZE-1)
-    ptr+=q#Q_SIZE-1
-    len-=q#Q_SIZE-1
+  repeat while len > constant(q#Q_SIZE-1)
+    writeData_(handle,ptr,constant(q#Q_SIZE-1))
+    ptr+=constant(q#Q_SIZE-1)
+    len-=constant(q#Q_SIZE-1)
   return writeData_(handle,ptr,len)
 
 CON
@@ -1069,7 +1069,7 @@ pub dhcp_rebind
 '' This should be called when the ethernet cable is unplugged.
   if ip_dhcp_state<>DHCP_STATE_DISABLED
     ip_dhcp_state:=DHCP_STATE_UNBOUND
-    ip_dhcp_delay:=2       
+    ip_dhcp_delay:=1       
     ip_dhcp_next~
 PRI dhcp_process
 '' Called by the main network loop periodicly
@@ -1087,10 +1087,10 @@ PRI dhcp_process
         dhcp_rebind
    
 PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
-  nic.wr_frame(op) ' op (bootrequest)
-  nic.wr_frame($01) ' htype
-  nic.wr_frame($06) ' hlen
-  nic.wr_frame(hops) ' hops
+  nic.wr_frame_byte(op) ' op (bootrequest)
+  nic.wr_frame_byte($01) ' htype
+  nic.wr_frame_byte($06) ' hlen
+  nic.wr_frame_byte(hops) ' hops
 
   ' xid
   nic.wr_frame_long(xid)
@@ -1106,11 +1106,11 @@ PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
 
   ' source mac address
   nic.wr_frame_data(@local_macaddr,6)
-  nic.wr_frame_pad(10) ' padding
+  nic.wr_frame_pad(constant(10+64+128)) ' padding + sname + file
 
-  nic.wr_frame_pad(64) ' sname (empty)
+'  nic.wr_frame_pad(64) ' sname (empty)
 
-  nic.wr_frame_pad(128) ' file (empty)
+'  nic.wr_frame_pad(128) ' file (empty)
 
 PRI send_dhcp_request | i, pkt_len
   nic.start_frame
@@ -1124,38 +1124,23 @@ PRI send_dhcp_request | i, pkt_len
    
   ' DHCP Magic Cookie
   nic.wr_frame_data(@DHCP_MAGIC_COOKIE,4)
-{
-  nic.wr_frame($63)
-  nic.wr_frame($82)
-  nic.wr_frame($53)
-  nic.wr_frame($63)
-}
 
   ' DHCP Message Type
-  nic.wr_frame(53)
-  nic.wr_frame($01)
-  nic.wr_frame(DHCP_TYPE_DISCOVER)
+  nic.wr_frame_byte(53)
+  nic.wr_frame_byte($01)
+  nic.wr_frame_byte(DHCP_TYPE_DISCOVER)
 
   ' DHCP Parameter Request List
   nic.wr_frame_data(@DHCP_PARAM_REQUEST,DHCP_PARAM_REQUEST[1]+2)
-{
-  nic.wr_frame(55)
-  nic.wr_frame(5) ' 5 bytes long
-  nic.wr_frame(1) ' subnet mask
-  nic.wr_frame(3) ' gateway
-  nic.wr_frame(6) ' DNS server
-  nic.wr_frame(23) ' IP maxhops
-  nic.wr_frame(51) ' lease time
-}
 
   ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
+  nic.wr_frame_byte(61)
+  nic.wr_frame_byte($07)
+  nic.wr_frame_byte($01)
   nic.wr_frame_data(@local_macaddr,6)
 
   ' End of vendor data
-  nic.wr_frame($FF)
+  nic.wr_frame_byte($FF)
 
   nic.wr_frame_pad(47)
 
@@ -1168,6 +1153,7 @@ PRI send_dhcp_request | i, pkt_len
   return nic.send_frame
 
 DAT
+              long 0 ' align
 DHCP_MAGIC_COOKIE BYTE $63,$82,$53,$63
 DHCP_PARAM_REQUEST BYTE 55,5,1,3,6,23,51
  
@@ -1184,60 +1170,37 @@ PRI dhcp_offer_response | i, ptr
   
   ' DHCP Magic Cookie
   nic.wr_frame_data(@DHCP_MAGIC_COOKIE,4)
-{
-  nic.wr_frame($63)
-  nic.wr_frame($82)
-  nic.wr_frame($53)
-  nic.wr_frame($63)
-}
 
   ' DHCP Message Type
-  nic.wr_frame(53)
-  nic.wr_frame($01)
-  nic.wr_frame(DHCP_TYPE_REQUEST)
+  nic.wr_frame_byte(53)
+  nic.wr_frame_byte($01)
+  nic.wr_frame_byte(DHCP_TYPE_REQUEST)
 
   ' DHCP Parameter Request List
   nic.wr_frame_data(@DHCP_PARAM_REQUEST,DHCP_PARAM_REQUEST[1]+2)
-{
-  nic.wr_frame(55)
-  nic.wr_frame(5) ' 5 bytes long
-  nic.wr_frame(1) ' subnet mask
-  nic.wr_frame(3) ' gateway
-  nic.wr_frame(6) ' DNS server
-  nic.wr_frame(23) ' IP maxhops
-  nic.wr_frame(51) ' lease time
-}
 
   ' DHCP Client-ID
-  nic.wr_frame(61)
-  nic.wr_frame($07)
-  nic.wr_frame($01)
+  nic.wr_frame_byte(61)
+  nic.wr_frame_byte($07)
+  nic.wr_frame_byte($01)
   nic.wr_frame_data(@local_macaddr,6)
 
   if long[pkt+DHCP_yiaddr]
-    nic.wr_frame(50)
-    nic.wr_frame($04)
+    nic.wr_frame_byte(50)
+    nic.wr_frame_byte($04)
     nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
   elseif long[pkt+DHCP_ciaddr]
-    nic.wr_frame(50)
-    nic.wr_frame($04)
+    nic.wr_frame_byte(50)
+    nic.wr_frame_byte($04)
     nic.wr_frame_data(pkt+DHCP_ciaddr,4) 'ciaddr
 
-  ptr:=pkt+DHCP_Options+4
+  ptr:=pkt+constant(DHCP_Options+4)
   repeat while byte[ptr]<>$FF
     case byte[ptr]
-      54 : ' DHCP server id
-        nic.wr_frame(54)
-        nic.wr_frame(byte[ptr+1])
-        nic.wr_frame_data((ptr+2),byte[ptr+1])
-      51 : ' DHCP Lease Time
-        nic.wr_frame(51)
-        nic.wr_frame(byte[ptr+1])
-        nic.wr_frame_data((ptr+2),byte[ptr+1])
-      12 : ' Hostname
-        nic.wr_frame(12)
-        nic.wr_frame(byte[ptr+1])
-        nic.wr_frame_data((ptr+2),byte[ptr+1])
+      54,51,12 : ' DHCP server id
+        nic.wr_frame_byte(byte[ptr][0])
+        nic.wr_frame_byte(byte[ptr][1])
+        nic.wr_frame_data((ptr+2),byte[ptr][1])
     if byte[ptr]
       ptr++
       ptr+=byte[ptr]+1
@@ -1245,7 +1208,7 @@ PRI dhcp_offer_response | i, ptr
       ptr++
 
   ' End of vendor data
-  nic.wr_frame($FF)
+  nic.wr_frame_byte($FF)
 
   nic.wr_frame_pad(30) ' Padding
 
@@ -1275,13 +1238,13 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
     ' Transaction ID doesn't match. Ignore this packet.
     return
    
-  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][constant(DHCP_options+1)] == $82 and BYTE[pkt][constant(DHCP_options+2)] == $53 and BYTE[pkt][constant(DHCP_options+3)] == $63
     ' this is a DHCP packet! We should send a request.
-    ptr:=pkt+DHCP_Options+4
+    ptr:=pkt+constant(DHCP_Options+4)
     repeat while byte[ptr]<>$FF
       case byte[ptr]
         53 : ' DHCP message type
-          if byte[ptr+2]==DHCP_TYPE_OFFER
+          if byte[ptr][2]==DHCP_TYPE_OFFER
             dhcp_offer_response
             ' Lets wait extra time
             ip_dhcp_next:=LONG[RTCADDR]+ip_dhcp_delay      
@@ -1304,7 +1267,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
       else   
         ptr++
    
-  ' This is a DHCP/BOOTP reply! And guess what, we have no IP address.
+  ' Grab the IP address.
   bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
    
   ' Hackity hack hack... This is a dirty assumption we are making here...
@@ -1319,7 +1282,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
   ' This will be overridden by DHCP option 51, if set
   ip_dhcp_next := long[RTCADDR] + 3600
    
-  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][DHCP_options+1] == $82 and BYTE[pkt][DHCP_options+2] == $53 and BYTE[pkt][DHCP_options+3] == $63
+  if BYTE[pkt][DHCP_options] == $63 and BYTE[pkt][constant(DHCP_options+1)] == $82 and BYTE[pkt][constant(DHCP_options+2)] == $53 and BYTE[pkt][constant(DHCP_options+3)] == $63
     ptr:=pkt+DHCP_Options+4
     repeat while byte[ptr]<>$FF
       case byte[ptr]
@@ -1333,7 +1296,7 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
           bytemove(@ip_dhcp_next,ptr+2,4) ' lease time
           ip_dhcp_next := conv_endianlong(ip_dhcp_next)
           if ip_dhcp_next == $FFFFFFFF
-            ip_dhcp_next := $7FFFFFFF
+            ip_dhcp_next := POSX
           else
             ip_dhcp_next>>=1
             ip_dhcp_next+=long[RTCADDR]

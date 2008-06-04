@@ -123,12 +123,12 @@ PUB init | i, tv_mode
   ' Load persistent environment settings  
   settings.start  
 
+  ' Fire up the almighty subsys
+  subsys.init
+
   ' Set the direction on the sound pin depending
   ' on if we are muted or not.
-  if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-    dira[subsys#SPKRPin]~~
-  else
-    dira[subsys#SPKRPin]~
+  dira[subsys#SPKRPin]:=!settings.findKey(settings#MISC_SOUND_DISABLE)
 
   ' If we are in the second stage of a bootloader upgrade,
   ' then we need set the appropriate variable.
@@ -139,8 +139,6 @@ PUB init | i, tv_mode
   else
     stage_two := FALSE
 
-  ' Fire up the almighty subsys
-  subsys.init
   subsys.StatusLoading
 
   ' If there is a TV mode preference in the EEPROM, load it up.
@@ -236,15 +234,6 @@ PUB init | i, tv_mode
       term.out(".")
     term.dec(byte[@stack][i])
   term.out(13)  
-
-  ' If we have a DNS address, print that out too.
-  'if settings.getData(settings#NET_IPv4_DNS,@stack,4)
-  '  term.str(string("DNS ADDR: "))
-  '  repeat i from 0 to 3
-  '    if i
-  '      term.out(".")
-  '    term.dec(byte[@stack][i])
-  '  term.out(13)  
 
   if stage_two
     subsys.FadeToColor(255,255,255,200)
