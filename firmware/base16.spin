@@ -4,12 +4,10 @@
 ** PUBLIC DOMAIN
 ** 2008-05-19
 **
-** NOT YET STABLE OR FULLY TESTED.
-**
 }}
 PUB inplaceDecode(in_ptr)
 {{ Decodes a base16 encoded string in-place. Returns the size of the decoded data. }}
-  return decode(in_ptr,in_ptr,1000000)
+  return decode(in_ptr,in_ptr,POSX)
 PUB decode(out_ptr,in_ptr,len)|i,in,char,size
   size:=0
   ifnot in_ptr
@@ -27,7 +25,8 @@ PUB decode(out_ptr,in_ptr,len)|i,in,char,size
     if (i:=base16_decode_byte(in))=>0
       BYTE[out_ptr++]:=i
       size++
-  while char AND i=>0     
+      len--
+  while char AND len AND i=>0     
   BYTE[out_ptr]:=0
   return size
 
