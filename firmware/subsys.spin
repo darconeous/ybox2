@@ -52,6 +52,7 @@ subsyscog byte 0
 lasterror byte 0
 OBJ
   settings      : "settings"
+  pause         : "pause"
 VAR
   long stack[20] 'Stack space for new cog
 PUB init | LED_Conf
@@ -115,10 +116,7 @@ PUB StatusErrorCode(i)
   if lasterror <> i
     StatusOff
     lasterror := i
-    modecog := cognew(ErrorCodeCycle(i), @stack) + 1
-PRI delay_ms(Duration)
-  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
-  
+    modecog := cognew(ErrorCodeCycle(i), @stack) + 1  
 PUB FadeToColor(rB,gB,bB,dur)
   StatusOff
   modecog := cognew(FadeToColorBlocking(rB,gB,bB,dur), @stack) + 1
@@ -137,18 +135,18 @@ pub ChirpHappy | i, j
   repeat j from 0 to 2
     repeat i from 0 to 30
       outa[SPKRPin]:=!outa[SPKRPin]  
-      delay_ms(1)
+      pause.delay_ms(1)
     outa[SPKRPin]:=0  
-    delay_ms(50)
+    pause.delay_ms(50)
 pub ChirpSad | i
   repeat i from 0 to 15
     outa[SPKRPin]:=!outa[SPKRPin]  
-    delay_ms(17)
+    pause.delay_ms(17)
   outa[SPKRPin]:=0
 
 pub Click | i
   outa[SPKRPin]:=1  
-  delay_ms(10)
+  pause.delay_ms(10)
   outa[SPKRPin]:=0
 
 PUB StatusSolid(r,g,b)
@@ -163,12 +161,12 @@ PRI ErrorCodeCycle(i)
   repeat
     repeat i-1
       SetColor(255,0,0)
-      delay_ms(250)
+      pause.delay_ms(250)
       SetColor(0,0,0)
-      delay_ms(300)
+      pause.delay_ms(300)
     SetColor(255,0,0)
     FadeToColorBlocking(0,0,0,1000)
-    delay_ms(500)
+    pause.delay_ms(500)
 PRI ErrorCycle
   repeat
     FadeToColorBlocking(255,0,0,100)

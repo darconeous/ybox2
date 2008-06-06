@@ -103,6 +103,7 @@ OBJ
   auth          : "auth_digest"                                   
   md5           : "MD5"
   base16        : "base16"
+  pause         : "pause"
 VAR
   long stage_two
   long stack[10] 
@@ -152,7 +153,7 @@ PUB init | i, tv_mode
   printBanner
 
   if NOT stage_two AND settings.findKey(settings#MISC_AUTOBOOT)
-    delay_ms(2000)
+    pause.delay_ms(2000)
     if NOT ina[subsys#BTTNPin]
       boot_stage2
     else
@@ -164,10 +165,10 @@ PUB init | i, tv_mode
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
       subsys.chirpSad
-      delay_ms(20000)
+      pause.delay_ms(20000)
     else
       subsys.chirpHappy
-      delay_ms(2000)
+      pause.delay_ms(2000)
     reboot
 
   ' Init the auth object with some randomness
@@ -187,7 +188,7 @@ PUB init | i, tv_mode
   ' If the user is holding down the button, wait two seconds.
   repeat 10
     if ina[subsys#BTTNPin]
-      delay_ms(200)
+      pause.delay_ms(200)
     
   ' If the button is still being held down, then
   ' assume we are in a password reset condition.
@@ -215,7 +216,7 @@ PUB init | i, tv_mode
     ' stage 2 boot.
     repeat 200
       buttonCheck
-      delay_ms(100)
+      pause.delay_ms(100)
     reboot
 
   ' Wait for the IP address if we don't already have one.
@@ -223,7 +224,7 @@ PUB init | i, tv_mode
     term.str(string("IPv4 ADDR: DHCP..."))
     repeat while NOT settings.getData(settings#NET_IPv4_ADDR,@stack,4)
       buttonCheck
-      delay_ms(100)
+      pause.delay_ms(100)
     term.out($0A)
     term.out($00)  
 
@@ -357,7 +358,7 @@ pri buttonCheck
     ' If the user is holding down the button, wait two seconds.
     repeat 10
       if ina[subsys#BTTNPin]
-        delay_ms(200)
+        pause.delay_ms(200)
 
     if ina[subsys#BTTNPin]
       ' The user is still holding down the button.
@@ -452,7 +453,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
   repeat
     repeat while \websocket.listen(80) < 0
       buttonCheck
-      delay_ms(1000)
+      pause.delay_ms(1000)
       websocket.closeall
       next
     contentLength:=0
@@ -542,7 +543,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.str(@CR_LF)
         websocket.str(string("REBOOTING",13,10))
         websocket.close
-        delay_ms(100)
+        pause.delay_ms(100)
         outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
         reboot
       elseif strcomp(@httpPath,string("/irtest"))
@@ -561,7 +562,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.str(@CR_LF)
         websocket.str(string("BOOTING STAGE 2",13,10))
         websocket.close
-        delay_ms(100)
+        pause.delay_ms(100)
         boot_stage2
       elseif strcomp(@httpPath,string("/login"))
         if authorized<>auth#STAT_AUTH
@@ -719,7 +720,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
             websocket.tx(" ")
             websocket.str(@OK)
             websocket.close
-            delay_ms(100)
+            pause.delay_ms(100)
             if stage_two
               outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
               reboot
@@ -1135,9 +1136,6 @@ PUB showMessage(str)
   term.str(string($1,$B,12,$C,$1))    
   term.str(str)    
   term.str(string($C,$8))    
-
-PRI delay_ms(Duration)
-  waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
   
 DAT
         org
