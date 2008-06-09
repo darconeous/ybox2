@@ -250,7 +250,7 @@ pub httpServer | char, i, contentLength,authorized,queryPtr,tempC,tempF
           convertTemperature
           selectAnyDevice    
           tempC := getTemperature                             ' get temperature in celsius
-
+        
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)

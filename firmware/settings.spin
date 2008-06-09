@@ -70,6 +70,7 @@ CON { Keys for various stuff }
   MISC_SOUND_DISABLE = "s"+("-"<<8)
   MISC_LED_CONF      = "l"+("c"<<8) ' 4 bytes: red pin, green pin, blue pin, CC=0/CA=1
   MISC_TV_MODE       = "t"+("v"<<8) ' 1 byte, 0=NTSC, 1=PAL
+  MISC_ONE_WIRE_BUS  = "1"+("w"<<8) ' Pin number for the one wire bus
 
   MISC_STAGE2        = "2"+("2"<<8)
 

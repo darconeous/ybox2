@@ -23,8 +23,8 @@ CON
   _clkmode = xtal1 + pll16x
   _xinfreq = 5_000_000                                                      
   LED_CA = 1 ' 1 = Common Anode, 0 = Common Cathode
-  LED_RPin = 9
-  LED_GPin = 10
+  LED_RPin = 10
+  LED_GPin = 09
   LED_BPin = 11
   LED_Brightness = 8 ' 0 = least bright, 8 = most bright
   IRPin = 15
