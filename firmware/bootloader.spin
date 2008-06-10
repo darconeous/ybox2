@@ -448,6 +448,22 @@ pri httpNotFound
   websocket.str(@CR_LF)
   websocket.str(@HTTP_404)
 
+pri parseIPStr(instr,outaddr) | char, i,j
+  repeat j from 0 to 3
+    BYTE[outaddr][j]:=0
+  j:=0
+  repeat while j < 4
+    case BYTE[instr]
+      "0".."9":
+        BYTE[outaddr][j]:=BYTE[outaddr][j]*10+BYTE[instr]-"0"
+      ".":
+        j++
+      other:
+        quit
+    instr++
+  if j==3
+    return TRUE
+  abort FALSE 
      
 pub httpServer | i,j,contentLength,authorized,stale,queryptr
   repeat
@@ -501,6 +517,41 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.str(@HTTP_CONNECTION_CLOSE)
         websocket.str(@CR_LF)
         infoPage
+      elseif strcomp(@httpPath,string("/config"))
+        if authorized<>auth#STAT_AUTH
+          httpUnauthorized(authorized)
+          websocket.close
+          next
+        i:=0
+        repeat while contentLength AND i<127
+          buffer[i++]:=websocket.rxtime(1000)
+          contentLength--
+        buffer[i]~
+        buffer2[0]~
+        if http.getFieldFromQuery(@buffer,string("dhcp"),@buffer2,64)
+          if buffer2[0] == "0"
+            settings.setByte(settings#NET_DHCPv4_DISABLE,1)
+          else
+            settings.removeKey(settings#NET_DHCPv4_DISABLE)
+        if http.getFieldFromQuery(@buffer,string("addr"),@buffer2,64)
+          parseIPStr(@buffer2,@buffer2+65)
+          settings.setData(settings#NET_IPv4_ADDR,@buffer2+65,4)  
+        if http.getFieldFromQuery(@buffer,string("mask"),@buffer2,64)
+          parseIPStr(@buffer2,@buffer2+65)
+          settings.setData(settings#NET_IPv4_MASK,@buffer2+65,4)  
+        if http.getFieldFromQuery(@buffer,string("gate"),@buffer2,64)
+          parseIPStr(@buffer2,@buffer2+65)
+          settings.setData(settings#NET_IPv4_GATE,@buffer2+65,4)  
+        if http.getFieldFromQuery(@buffer,string("dns1"),@buffer2,64)
+          parseIPStr(@buffer2,@buffer2+65)
+          settings.setData(settings#NET_IPv4_DNS,@buffer2+65,4)  
+        settings.commit
+        websocket.str(@HTTP_VERSION)
+        websocket.str(@HTTP_200)
+        websocket.str(@HTTP_CONNECTION_CLOSE)
+        websocket.str(@CR_LF)
+        websocket.str(string("Settings changed. Reboot required.",13,10))
+         
       elseif strcomp(@httpPath,string("/password"))
         if authorized<>auth#STAT_AUTH
           httpUnauthorized(authorized)
@@ -879,6 +930,18 @@ pub addTextField(id,label,value,length)
   websocket.str(string("' value='"))
   websocket.strxml(value)
   websocket.str(string("' /></div>"))
+pub addIPField(id,label,value,length)
+  websocket.str(string("<div><label for='"))
+  websocket.str(id)
+  websocket.str(string("'>"))
+  websocket.str(label)
+  websocket.str(string(":</label><br /><input name='"))
+  websocket.str(id)
+  websocket.str(string("' id='"))
+  websocket.str(id)
+  websocket.str(string("' value='"))
+  websocket.txip(value)
+  websocket.str(string("' /></div>"))
 pub addPasswordField(id,label,value,length)
   websocket.str(string("<div><label for='"))
   websocket.str(id)
@@ -952,13 +1015,32 @@ pub indexPage(authorized) | i
      
     if authorized
       beginForm(string("/password"),string("POST"))
-'      addTextField(string("username"),string("Username"),string("admin"),32)
       websocket.str(string("<div><small>Username is 'admin'.</small></div>"))
       addPasswordField(string("pwd1"),string("Password"),0,PASSWORD_MAX)
       addPasswordField(string("pwd2"),string("Password (Repeat)"),0,PASSWORD_MAX)
       addSubmitButton 
       endForm
-     
+
+    if authorized
+      beginForm(string("/config"),string("POST"))
+      websocket.str(string("DHCP:<br \> <input type='radio' name='dhcp' value='0'"))
+      if (settings.getByte(settings#NET_DHCPv4_DISABLE))
+        websocket.str(string(" checked "))
+      websocket.str(string("> Disabled <input type='radio' name='dhcp' value='1' "))
+      if (not settings.getByte(settings#NET_DHCPv4_DISABLE))
+        websocket.str(string(" checked "))
+      websocket.str(string("> Enabled<br \>"))
+      settings.getData(settings#NET_IPv4_ADDR,@buffer,4)
+      addIPField(string("addr"),string("IP"),@buffer,constant(3+3*4))
+      settings.getData(settings#NET_IPv4_MASK,@buffer,4)
+      addIPField(string("mask"),string("Subnet Mask"),@buffer,constant(3+3*4))
+      settings.getData(settings#NET_IPv4_GATE,@buffer,4)
+      addIPField(string("gate"),string("Gateway"),@buffer,constant(3+3*4))
+      settings.getData(settings#NET_IPv4_DNS,@buffer,4)
+      addIPField(string("dns1"),string("Domain Name Server"),@buffer,constant(3+3*4))
+      addSubmitButton 
+      endForm
+       
   websocket.str(string("<h2>Actions</h2>"))
   websocket.str(string("<p>"))
   ifnot stage_two

@@ -16,7 +16,10 @@
         * Incoming TCP packets are only accepted in order. Out
           of order packets will be dropped. This will only
           kill the connection if the sender refuses to retransmit.
-           
+
+
+  Todo:
+        * RFC3927 - Dynamic Configuration of IPv4 Link-Local Addresses           
 }}
 
 OBJ
@@ -33,22 +36,28 @@ CON
   RTCADDR = $8000-settings#SettingsSize-4
 
   MIN_ADVERTISED_WINDOW = q#Q_SIZE/2
+
+  IPv6_ADDR_LEN = 16
+  IPv4_ADDR_LEN = 4
+  IP_ADDR_LEN = IPv4_ADDR_LEN
+
+  HW_ADDR_LEN = 6
   
 DAT
 ' Don't set any of these values by hand!
 ' Use the associated setting keys instead.
 ' See the settings object for more details.
-local_macaddr   byte    $02, $00, $00, $00, $00, $01
 local_mtu       word    1500
+local_macaddr   byte    $02[HW_ADDR_LEN]
 bcast_ipaddr    long    $FFFFFFFF
 any_ipaddr    long    $00000000
-ip_addr         byte    0,0,0,0            ' device's ip address
-ip_subnet       byte    $ff,$ff,$ff,00        ' network subnet
+ip_addr         byte    192,168,2,20            ' device's ip address
+ip_subnet       byte    $ff,$ff,$00,$00        ' network subnet
 ip_gateway      byte    192, 168, 2, 1          ' network gateway (router)
 ip_dns          byte    $04,$02,$02,$04          ' network dns        
 ip_maxhops      byte    $80
  
-bcast_macaddr   byte    $FF, $FF, $FF, $FF, $FF, $FF
+bcast_macaddr   byte    $FF[HW_ADDR_LEN]
 
 DAT
   stack       long 0[200]
@@ -84,12 +93,12 @@ PUB start(cs, sck, si, so, int, xtalout) : okay
   pkt_id := random.random
   random.stop
 
-  ifnot settings.getData(settings#NET_MAC_ADDR,@local_macaddr,6)
-    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,6)  
-  settings.getData(settings#NET_IPv4_ADDR,@ip_addr,4)
-  settings.getData(settings#NET_IPv4_MASK,@ip_subnet,4)
-  settings.getData(settings#NET_IPv4_GATE,@ip_gateway,4)
-  settings.getData(settings#NET_IPv4_DNS,@ip_dns,4)
+  ifnot settings.getData(settings#NET_MAC_ADDR,@local_macaddr,HW_ADDR_LEN)
+    settings.setData(settings#NET_MAC_ADDR,@local_macaddr,HW_ADDR_LEN)  
+  settings.getData(settings#NET_IPv4_ADDR,@ip_addr,IPv4_ADDR_LEN)
+  settings.getData(settings#NET_IPv4_MASK,@ip_subnet,IPv4_ADDR_LEN)
+  settings.getData(settings#NET_IPv4_GATE,@ip_gateway,IPv4_ADDR_LEN)
+  settings.getData(settings#NET_IPv4_DNS,@ip_dns,IPv4_ADDR_LEN)
 
   dhcp_init
 
@@ -170,10 +179,10 @@ PRI compose_ip_header(protocol,dst_addr,src_addr) | chksum
   nic.wr_frame_byte(ip_maxhops)  ' TTL
   nic.wr_frame_byte(protocol)  ' UDP
   nic.wr_frame_word($0000)  ' header checksum (Filled in by hardware)
-  nic.wr_frame_data(src_addr,4)
-  nic.wr_frame_data(dst_addr,4)
+  nic.wr_frame_data(src_addr,IPv4_ADDR_LEN)
+  nic.wr_frame_data(dst_addr,IPv4_ADDR_LEN)
 
-  return protocol + calc_chksumhalf(src_addr, 4) + calc_chksumhalf(dst_addr, 4)
+  return protocol + calc_chksumhalf(src_addr, IPv4_ADDR_LEN) + calc_chksumhalf(dst_addr, IPv4_ADDR_LEN)
 
 PRI compose_udp_header(dst_port,src_port,chksum)
   nic.wr_frame_word(src_port)  ' Source Port
@@ -186,22 +195,22 @@ PRI compose_arp(type,lmac,lip,rmac,rip)
 
   nic.wr_frame_word($0800)             ' ip proto
 
-  nic.wr_frame_byte($06)             ' mac addr len
-  nic.wr_frame_byte($04)             ' proto addr len
+  nic.wr_frame_byte(HW_ADDR_LEN)             ' mac addr len
+  nic.wr_frame_byte(IPv4_ADDR_LEN)             ' proto addr len
 
   nic.wr_frame_word(type)       'type
 
   ' write ethernet module mac address
-  nic.wr_frame_data(lmac,6)
+  nic.wr_frame_data(lmac,HW_ADDR_LEN)
 
   ' write ethernet module ip address
-  nic.wr_frame_data(lip,4)
+  nic.wr_frame_data(lip,IPv4_ADDR_LEN)
 
   ' write remote mac address
-  nic.wr_frame_data(rmac,6)
+  nic.wr_frame_data(rmac,HW_ADDR_LEN)
 
   ' write remote ip address
-  nic.wr_frame_data(rip,4)
+  nic.wr_frame_data(rip,IPv4_ADDR_LEN)
 
 
 PRI arp_request(rip) | i
@@ -212,6 +221,10 @@ PRI arp_request(rip) | i
 
 
 PRI handle_arp | i
+  if ip_dhcp_state<DHCP_STATE_BOUND
+    ' Don't reply to ARP packets until we have a stable ip address
+    return
+  
   nic.start_frame
   compose_ethernet_header(pkt+enetpacketSrc0,@local_macaddr,$0806)
   compose_arp(2,@local_macaddr,@ip_addr,pkt+enetpacketSrc0,pkt+arp_sipaddr)
@@ -221,7 +234,7 @@ PRI handle_arp | i
 PRI handle_arpreply | handle, handle_addr, ip, found
   ' Gets arp reply if it is a response to an ip we have
 
-  bytemove(@ip, pkt + arp_sipaddr, 4)
+  bytemove(@ip, pkt + arp_sipaddr, IPv4_ADDR_LEN)
 
   found := false
   if ip == LONG[@ip_gateway]
@@ -269,12 +282,12 @@ PRI handle_icmp | i,pkt_len
         ++pkt_id
 
         ' Reply to the same MAC
-        wordmove(pkt + enetpacketDest0, pkt + enetpacketSrc0, 3)
-        wordmove(pkt + enetpacketSrc0, @local_macaddr, 3)                             ' Set source mac address
+        wordmove(pkt + enetpacketDest0, pkt + enetpacketSrc0, constant(HW_ADDR_LEN/2))
+        wordmove(pkt + enetpacketSrc0, @local_macaddr, constant(HW_ADDR_LEN/2))                             ' Set source mac address
 
         ' Reply to the same IP
-        wordmove(pkt + ip_destaddr, pkt + ip_srcaddr, 2)
-        wordmove(pkt + ip_srcaddr, @ip_addr, 2)
+        wordmove(pkt + ip_destaddr, pkt + ip_srcaddr, constant(IPv4_ADDR_LEN/2))
+        wordmove(pkt + ip_srcaddr, @ip_addr, constant(IPv4_ADDR_LEN/2))
   
         BYTE[pkt][ip_id] := pkt_id >> 8
         BYTE[pkt][ip_id+1] := pkt_id
@@ -318,7 +331,7 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     ' Only let TCP work if the destination matches our address.
     abort -1
 
-  wordmove(@srcip, pkt + ip_srcaddr, 2)
+  wordmove(@srcip, pkt + ip_srcaddr, constant(IPv4_ADDR_LEN/2))
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
 
@@ -594,10 +607,20 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     elseif state == SCONNECTINGARP1
       ' We need to send an arp request
 
+      if ip_dhcp_state<DHCP_STATE_BOUND AND NOT ip_is_on_same_subnet(handle_addr+sSrcIp)
+        ' We need to wait before we can start
+        ' servicing this socket.
+        return
+
       arp_request_checkgateway(handle_addr)
 
     elseif state == SCONNECTING
       ' Yea! We got an arp response previously, so now we can send the SYN
+
+      if ip_dhcp_state<DHCP_STATE_BOUND AND NOT ip_is_on_same_subnet(handle_addr+sSrcIp)
+        ' We need to wait before we can start
+        ' servicing this socket.
+        return
 
       LONG[handle_addr + sMySeqNum] := randseed?
       LONG[handle_addr + sMyAckNum] := 0
@@ -607,12 +630,14 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
       BYTE[handle_addr + sConState] := SSYNSENT
       LONG[handle_addr + sAge] := long[RTCADDR]
       
+PRI ip_is_on_same_subnet(ip_ptr)
+  return (BYTE[ip_ptr] & ip_subnet[0]) == (ip_addr[0] & ip_subnet[0]) AND (BYTE[ip_ptr + 1] & ip_subnet[1]) == (ip_addr[1] & ip_subnet[1]) AND (BYTE[ip_ptr + 2] & ip_subnet[2]) == (ip_addr[2] & ip_subnet[2]) AND (BYTE[ip_ptr + 3] & ip_subnet[3]) == (ip_addr[3] & ip_subnet[3])
 
 PRI arp_request_checkgateway(handle_addr) | ip_ptr
 
   ip_ptr := handle_addr + sSrcIp
   
-  if (BYTE[ip_ptr] & ip_subnet[0]) == (ip_addr[0] & ip_subnet[0]) AND (BYTE[ip_ptr + 1] & ip_subnet[1]) == (ip_addr[1] & ip_subnet[1]) AND (BYTE[ip_ptr + 2] & ip_subnet[2]) == (ip_addr[2] & ip_subnet[2]) AND (BYTE[ip_ptr + 3] & ip_subnet[3]) == (ip_addr[3] & ip_subnet[3])   
+  if ip_is_on_same_subnet(ip_ptr)
     arp_request(ip_ptr)
     BYTE[handle_addr + sConState] := SCONNECTINGARP2
     LONG[handle_addr + sAge] := long[RTCADDR]
@@ -1010,7 +1035,7 @@ DAT
 DAT
 ' DHCP Vars
         ip_dhcp_server_ip  byte    0,0,0,0
-        ip_dhcp_server_mac byte    $FF, $FF, $FF, $FF, $FF, $FF
+        ip_dhcp_server_mac byte    $FF[HW_ADDR_LEN]
         ip_dhcp_state   byte    0
         ip_dhcp_xid     long    0
         ip_dhcp_next    long    0                   ' Time for next DHCP op
@@ -1087,7 +1112,7 @@ PRI dhcp_process
 PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
   nic.wr_frame_byte(op) ' op (bootrequest)
   nic.wr_frame_byte($01) ' htype
-  nic.wr_frame_byte($06) ' hlen
+  nic.wr_frame_byte(HW_ADDR_LEN) ' hlen
   nic.wr_frame_byte(hops) ' hops
 
   ' xid
@@ -1097,14 +1122,14 @@ PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
 
   nic.wr_frame_pad(2) ' padding ('flags')
 
-  nic.wr_frame_data(ciaddr_ptr,4) 'ciaddr
-  nic.wr_frame_data(yiaddr_ptr,4) 'yiaddr
-  nic.wr_frame_data(siaddr_ptr,4) 'siaddr
-  nic.wr_frame_data(giaddr_ptr,4) 'giaddr
+  nic.wr_frame_data(ciaddr_ptr,IPv4_ADDR_LEN) 'ciaddr
+  nic.wr_frame_data(yiaddr_ptr,IPv4_ADDR_LEN) 'yiaddr
+  nic.wr_frame_data(siaddr_ptr,IPv4_ADDR_LEN) 'siaddr
+  nic.wr_frame_data(giaddr_ptr,IPv4_ADDR_LEN) 'giaddr
 
   ' source mac address
-  nic.wr_frame_data(@local_macaddr,6)
-  nic.wr_frame_pad(constant(10+64+128)) ' padding + sname + file
+  nic.wr_frame_data(@local_macaddr,HW_ADDR_LEN)
+  nic.wr_frame_pad(constant(16+64+128-HW_ADDR_LEN)) ' padding + sname + file
 
 '  nic.wr_frame_pad(64) ' sname (empty)
 
@@ -1133,9 +1158,9 @@ PRI send_dhcp_request | i, pkt_len
 
   ' DHCP Client-ID
   nic.wr_frame_byte(61)
-  nic.wr_frame_byte($07)
+  nic.wr_frame_byte(constant(1+HW_ADDR_LEN))
   nic.wr_frame_byte($01)
-  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_data(@local_macaddr,HW_ADDR_LEN)
 
   ' End of vendor data
   nic.wr_frame_byte($FF)
@@ -1179,18 +1204,18 @@ PRI dhcp_offer_response | i, ptr
 
   ' DHCP Client-ID
   nic.wr_frame_byte(61)
-  nic.wr_frame_byte($07)
+  nic.wr_frame_byte(constant(1+HW_ADDR_LEN))
   nic.wr_frame_byte($01)
-  nic.wr_frame_data(@local_macaddr,6)
+  nic.wr_frame_data(@local_macaddr,HW_ADDR_LEN)
 
   if long[pkt+DHCP_yiaddr]
     nic.wr_frame_byte(50)
-    nic.wr_frame_byte($04)
-    nic.wr_frame_data(pkt+DHCP_yiaddr,4) 'yiaddr
+    nic.wr_frame_byte(IPv4_ADDR_LEN)
+    nic.wr_frame_data(pkt+DHCP_yiaddr,IPv4_ADDR_LEN) 'yiaddr
   elseif long[pkt+DHCP_ciaddr]
     nic.wr_frame_byte(50)
-    nic.wr_frame_byte($04)
-    nic.wr_frame_data(pkt+DHCP_ciaddr,4) 'ciaddr
+    nic.wr_frame_byte(IPv4_ADDR_LEN)
+    nic.wr_frame_data(pkt+DHCP_ciaddr,IPv4_ADDR_LEN) 'ciaddr
 
   ptr:=pkt+constant(DHCP_Options+4)
   repeat while byte[ptr]<>$FF
@@ -1266,15 +1291,15 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
         ptr++
    
   ' Grab the IP address.
-  bytemove(@ip_addr, pkt+DHCP_yiaddr, 4)
+  bytemove(@ip_addr, pkt+DHCP_yiaddr, IPv4_ADDR_LEN)
    
   ' Hackity hack hack... This is a dirty assumption we are making here...
   ' We only end up using this assumption if this is BOOTP and not DHCP,
   ' so it isn't a big deal.
   if BYTE[pkt][DHCP_giaddr]
-    bytemove(@ip_gateway, pkt+DHCP_giaddr, 4)
+    bytemove(@ip_gateway, pkt+DHCP_giaddr, IPv4_ADDR_LEN)
   else
-    bytemove(@ip_gateway, pkt+ip_srcaddr, 4)
+    bytemove(@ip_gateway, pkt+ip_srcaddr, IPv4_ADDR_LEN)
     
   ' Set this IP address to expire in an hour.
   ' This will be overridden by DHCP option 51, if set
@@ -1284,10 +1309,10 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
     ptr:=pkt+DHCP_Options+4
     repeat while byte[ptr]<>$FF
       case byte[ptr]
-        01 : bytemove(@ip_subnet,ptr+2,4)
-        03 : bytemove(@ip_gateway,ptr+2,4)
-        06 : bytemove(@ip_dns,ptr+2,4)
-        54 : bytemove(@ip_dhcp_server_ip,ptr+2,4)
+        01 : bytemove(@ip_subnet,ptr+2,IPv4_ADDR_LEN)
+        03 : bytemove(@ip_gateway,ptr+2,IPv4_ADDR_LEN)
+        06 : bytemove(@ip_dns,ptr+2,IPv4_ADDR_LEN)
+        54 : bytemove(@ip_dhcp_server_ip,ptr+2,IPv4_ADDR_LEN)
         23 : ' Default IP maxhops
           bytemove(@ip_maxhops,ptr+2,1)
         51 :
@@ -1315,12 +1340,15 @@ PRI handle_dhcp | i, ptr, handle, handle_addr, xid, srcport', datain_len
         ptr++
 
   ip_dhcp_state:=DHCP_STATE_BOUND
-  bytemove(@ip_dhcp_server_mac, pkt+enetpacketSrc0, 6)
+  bytemove(@ip_dhcp_server_mac, pkt+enetpacketSrc0, HW_ADDR_LEN)
    
-  settings.setData(settings#NET_IPv4_ADDR,@ip_addr,4)
-  settings.setData(settings#NET_IPv4_MASK,@ip_subnet,4)
-  settings.setData(settings#NET_IPv4_GATE,@ip_gateway,4)
-  settings.setData(settings#NET_IPv4_DNS,@ip_dns,4)
+  settings.setData(settings#NET_IPv4_ADDR,@ip_addr,IPv4_ADDR_LEN)
+  settings.setData(settings#NET_IPv4_MASK,@ip_subnet,IPv4_ADDR_LEN)
+  settings.setData(settings#NET_IPv4_GATE,@ip_gateway,IPv4_ADDR_LEN)
+  settings.setData(settings#NET_IPv4_DNS,@ip_dns,IPv4_ADDR_LEN)
 
 PRI has_valid_ip_addr
   return long[@ip_addr] AND ip_dhcp_state=>DHCP_STATE_BOUND
+
+
+  
