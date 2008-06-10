@@ -327,7 +327,7 @@ pub WeatherUpdate(port) | timeout, addr, gotstart,in,i,header[4],value[4]
     timeout := cnt
     i:=0
     repeat
-      if (in := \tel.rxcheck) > 0
+      if (in := \tel.rxcheck) => 0
         if in <> 10
           \term.out(in)
           i++
