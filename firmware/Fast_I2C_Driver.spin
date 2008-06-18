@@ -27,18 +27,22 @@ PUB start(scl)
   mask_scl := 1<<scl
   mask_sda := 1<<(scl+1)
 
-  dira[28]~
-  dira[29]~
-  outa[28]~
-  outa[29]~
+  dira[scl]~
+  dira[scl+1]~
+  outa[scl]~
+  outa[scl+1]~
 
   stop
   command~~
   cog := cognew(@init, @command) + 1
-
+  
   'Wait for the cog to start
-  if cog
-    repeat while command
+  ifnot cog
+    abort -1
+
+  repeat while command
+  repeat while busy
+  
 PUB stop
   if cog
     cogstop(cog~ - 1)
@@ -46,22 +50,29 @@ PUB stop
 
 PUB setcommand(cmd, arg0_, arg1_)
   command := cmd << 16 + @arg0_                       'write command and pointer
+
+  if cmd & CMD_BOOTSTRAP
+    ' If this was a bootstrap command,
+    ' then kill this cog.
+    cogstop(cogid)
+
   repeat while command                                'wait for command to be cleared, signifying receipt
   return arg0_
   
 PUB bootstrapFromEEPROM(addr_,size)|device
-  if !cog
+  ifnot cog
     start(28)
   device:=EEPROM
   device |= addr_ >> 15 & %1110
+  repeat while busy
   setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
   setcommand(CMD_WRITE_BYTE,addr_>>8,0)
   setcommand(CMD_WRITE_BYTE,addr_,0)
   setcommand(CMD_BEGIN,device|Recv,0)
-  setcommand(CMD_READ|CMD_END|CMD_BOOTSTRAP,0,size)
+  setcommand(CMD_READ|CMD_BOOTSTRAP,0,size)
 
 PUB blockRead(destaddr,addr_,count): ackBit|device
-  if !cog
+  ifnot cog
     start(28)
   device:=EEPROM
   device |= addr_ >> 15 & %1110
@@ -73,21 +84,15 @@ PUB blockRead(destaddr,addr_,count): ackBit|device
   if ackbit
     abort ackbit
 PUB blockWrite(destaddr,srcaddr,count): ackBit|device
-  if !cog
+  ifnot cog
     start(28)
   device:=EEPROM
   device |= destaddr >> 15 & %1110
   ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Xmit,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,(destaddr>>8) & $FF,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr & $FF,0)
-  'ackbit := (ackbit << 1) | setcommand(CMD_WRITE|CMD_END,srcaddr,count)
+  ackbit := (ackbit << 1) | setcommand(CMD_WRITE|CMD_END,srcaddr,count)
 
-  repeat count
-    ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,byte[srcaddr++],0)
-  
-
-  setcommand(CMD_END,0,0)
-  setcommand(CMD_BEGIN,EEPROM|Recv,0)
   if ackbit
     abort ackbit
 PUB busy
@@ -131,12 +136,14 @@ loop          wrlong  zero,par                          'zero command (tell spin
 error
               jmp #loop                                 ' no cmd found
 
+restart
               mov     smode,#$1FF              'reboot actualy
               clkset  smode                   '(reboot)
                
-launch                  rdword  address,#$0004+2        'if pbase address invalid, shutdown
+launch
+                        rdword  address,#$0004+2        'if pbase address invalid, shutdown
                         cmp     address,#$0010  wz
-        if_nz           jmp     #error
+        if_nz           jmp     #restart
 
                         rdbyte  address,#$0004          'if xtal/pll enabled, start up now
                         and     address,#$F8            '..while remaining in rcfast mode
@@ -179,16 +186,16 @@ ee_start                mov     bits,#9                 '1      ready 9 start at
 :loop                   andn    outa,mask_scl           '1(!)   ready scl low
                         or      dira,mask_scl           '1!     scl low
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         andn    dira,mask_sda           '1!     sda float
                         call    #delay5                 '5
-                        call    #delay5                 '4
-                        call    #delay5                 '5
+'                        call    #delay5                 '4
+'                        call    #delay5                 '5
                         or      outa,mask_scl           '1!     scl high
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
         if_nc           djnz    bits,#:loop             '1,2    if sda not high, loop until done
 
@@ -213,13 +220,13 @@ ee_tr                   mov     bits,#9                 '1      transmit/receive
                         rcl     eedata,#1               '1      shift in prior sda input state
                         muxz    dira,mask_sda           '1!     sda low/float
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
                         or      outa,mask_scl           '1!     scl high
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         djnz    bits,#:loop             '1,2    if another bit, loop
 
                         and     eedata,#$FF             '1      isolate byte received
@@ -250,39 +257,21 @@ ee_stop_ret             ret                             '1
 ' Cycle delays
 '
 delay5                  nop                             '1
-                        nop
-                        nop
-                        nop
-                        nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
 delay4                  nop                             '1
-                        nop
-                        nop
-                        nop
-                        nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
 delay3                  nop                             '1
-                        nop
-                        nop
-                        nop
-                        nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
 delay2
-                        nop                             '1
-                        nop                             '1
-                        nop                             '1
-                        nop                             '1
-                        nop                             '1
-                        nop                             '1
                         nop                             '1
                         nop                             '1
                         nop                             '1
@@ -296,7 +285,7 @@ delay5_ret              ret                             '1
 '
 ' Constants
 '
-time_xtal               long    20 * 80000 / 4 / 1      '20ms (@20MHz, 1 inst/loop)
+time_xtal               long    20 * 20000 / 4 / 1      '20ms (@20MHz, 1 inst/loop)
 zero                    long    0
 smode                   long    0
 'h8000                   long    $8000
