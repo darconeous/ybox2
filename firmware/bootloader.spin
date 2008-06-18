@@ -97,13 +97,14 @@ OBJ
   term          : "TV_Text"
   subsys        : "subsys"
   settings      : "settings"
-  eeprom        : "Basic_I2C_Driver"
   random        : "RealRandom"
   http          : "http"
-  auth          : "auth_digest"                                   
+  auth          : "auth_basic"                                   
   md5           : "MD5"
   base16        : "base16"
   pause         : "pause"
+  fast_eeprom   : "Fast_I2C_Driver"
+  
 VAR
   long stage_two
   long stack[10] 
@@ -122,7 +123,7 @@ PUB init | i, tv_mode
   tv_mode:=term#MODE_NTSC
   
   ' Load persistent environment settings  
-  settings.start  
+  \settings.start  
 
   ' Fire up the almighty subsys
   subsys.init
@@ -160,8 +161,8 @@ PUB init | i, tv_mode
       term.str(string("Autoboot Aborted.",13))
       subsys.chirpSad    
 
-  if NOT settings.findKey(settings#NET_MAC_ADDR)
-    if NOT \initial_configuration
+  ifnot settings.findKey(settings#NET_MAC_ADDR)
+    if initial_configuration <> 1
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
       subsys.chirpSad
@@ -169,7 +170,7 @@ PUB init | i, tv_mode
     else
       subsys.chirpHappy
       pause.delay_ms(2000)
-    reboot
+      reboot
 
   ' Init the auth object with some randomness
   random.start
@@ -289,6 +290,8 @@ PRI boot_stage2 | i
   if stage_two
     ' If we are already in stage 2, forget it... just reboot.
     reboot
+
+  fast_eeprom.stop
     
   ' Very aggressively shut down everything except our own cog
   repeat i from 0 to 7
@@ -296,16 +299,13 @@ PRI boot_stage2 | i
       cogstop(i)
     lockret(i)
 
-  ' Replace this cog with the bootloader
-  coginit(0,@bootstage2,0)
+  fast_eeprom.bootstrapFromEEPROM($8000,$8000-settings#SETTINGSSIZE)
 
-  ' Just in case...
-  cogstop(cogid)
 PRI initial_configuration | i
   term.str(string("First boot!",13))
 
   settings.purge
-  
+
   random.start
 
   ' Make a random UUID
@@ -322,7 +322,7 @@ PRI initial_configuration | i
   random.stop
 
   settings.commit
-  return TRUE
+  return 1
 
 PUB atoi(inptr):retVal | i,char
   retVal~
@@ -702,7 +702,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           httpUnauthorized(authorized)
           websocket.close
           next
-        sendFromEEPROM(@FULL_EEPROM_FILE+1,0,$10000-settings#SettingsSize)
+        sendFromEEPROM(@FULL_EEPROM_FILE+1,0,$10000{-settings#SettingsSize})
         
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
         if authorized<>auth#STAT_AUTH
@@ -749,6 +749,7 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
         websocket.str(@CR_LF)
         websocket.str(@HTTP_403)
       elseif strcomp(@httpPath,@STAGE2_EEPROM_FILE)
+        bytefill(@buffer2,$F0,128)
         if (i:=\downloadFirmwareHTTP(contentLength))
           subsys.StatusFatalError
           subsys.chirpSad
@@ -759,6 +760,9 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           websocket.str(string("Upload Failure",13,10))
           websocket.dec(i)         
           websocket.str(@CR_LF)
+          repeat i from 0 to 127
+            websocket.hex(buffer2[i],2)
+            websocket.tx(" ")
         else
           if strcomp(queryPtr,string("boot")) OR stage_two
             websocket.str(@HTTP_VERSION)
@@ -812,7 +816,7 @@ PUB sendFromEEPROM(filename,addr,len)| i
   websocket.str(@CR_LF)        
   websocket.str(@CR_LF)
   repeat i from 0 to len-1 step 128
-    if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+addr, @buffer, 128)
+    if \fast_eeprom.blockRead(@buffer, i+addr, 128)
       quit
     websocket.txData(@buffer,128)
    
@@ -1079,7 +1083,7 @@ pub indexPage(authorized) | i
   websocket.str(string("</body></html>",13,10))
 
 pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr,j, isFading
-  eeprom.Initialize(eeprom#BootPin)
+'  eeprom.Initialize(eeprom#BootPin)
 
   i~
   total~
@@ -1096,17 +1100,21 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
   md5.hashStart(@hash)
 
   repeat
+{
+    if (in := websocket.rxdata(buffer+i,128-i)) > 0
+      i+=in
+}
     if (in := websocket.rxcheck) => 0
+      buffer[i++] := in
       isFading~
       subsys.StatusSolid(0,255,0)
-      buffer[i++] := in
       if i == 128
         ' flush to EEPROM                              
         subsys.StatusSolid(0,0,255)
 
         if stage_two
           'Verify that the bytes we got match the EEPROM
-          if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
+          if fast_eeprom.blockRead(@buffer2,total+$8000, 128)
             abort -1
           repeat i from 0 to 127
             if buffer[i] <> buffer2[i]
@@ -1116,15 +1124,18 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
           repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
             md5.hashBlock(@buffer+i,@hash)
         else
-          if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
-            abort -3
+          ' Wait for the previous write to be finished
+          repeat while fast_eeprom.busy
+
+          repeat while \fast_eeprom.blockWrite(@buffer,total+addr, 128)
+          '  abort -3
 
           ' Calculate our hash while we wait
           repeat i from 0 to 128-md5#BLOCK_LENGTH step md5#BLOCK_LENGTH
             md5.hashBlock(@buffer+i,@hash)
             
           ' Wait for the write to be finished
-          repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
+          'repeat while fast_eeprom.busy
         total+=i
         i~
         bytefill(@buffer,0,128)
@@ -1150,7 +1161,7 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
 
           'Verify that the bytes we got match the EEPROM
           if i
-            if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, total+$8000, @buffer2, 128)
+            if \fast_eeprom.blockRead(@buffer2,total+$8000, 128)
               abort -1
             repeat j from 0 to i-1
               if buffer[j] <> buffer2[j]
@@ -1169,33 +1180,33 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
           term.str(string(13,"Writing",13))
 
           repeat i from 0 to total-1 step 128
-            if \eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, i+$8000, @buffer, 128)
-              abort -6
-            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, i, @buffer, 128)
-              abort -7
-            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
+            repeat while fast_eeprom.busy
+            repeat while \fast_eeprom.blockRead(@buffer,i+$8000, 128)
+            '  abort -6
+            repeat while \fast_eeprom.blockWrite(@buffer,i, 128)
+            '  abort -7
             term.out(".")
           ' Now we need to fill in the rest of the image with zeros.
           bytefill(@buffer,0,128)
           repeat j from i to $8000-settings#SettingsSize step 128
             subsys.StatusSolid(0,0,128)
-            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, j, @buffer, 128)
+            repeat while fast_eeprom.busy
+            if \fast_eeprom.blockWrite(@buffer,j, 128)
               abort -9
             subsys.StatusSolid(0,128,0)
-            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, j)
             term.out(".")
         else
-          if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, total+addr, @buffer, 128)
+          repeat while fast_eeprom.busy
+          if \fast_eeprom.blockWrite(@buffer,total+addr, 128)
             abort -8
-          repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, total)
           ' Now we need to fill in the rest of the image with zeros.
           bytefill(@buffer,0,128)
           repeat j from total+128 to $8000-settings#SettingsSize-1 step 128
             subsys.StatusSolid(0,0,128)
-            if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, j+addr, @buffer, 128)
+            repeat while fast_eeprom.busy
+            if \fast_eeprom.blockWrite( @buffer,j+addr, 128)
               abort -9
             subsys.StatusSolid(0,128,0)
-            repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, i)
             term.out(".")
 
           total+=i
@@ -1226,6 +1237,7 @@ DAT
 
 ' Load ram from eeprom and launch
 '
+{
 bootstage2              
                         clkset  zero
                         mov     raddress,zero
@@ -1406,6 +1418,7 @@ smode                   long    0
 h8000                   long    $8000
 programsize             long    $8000-settings#SettingsSize
 interpreter             long    $0001 << 18 + $3C01 << 4 + %0000
+}
 '
 '
 ' Variables

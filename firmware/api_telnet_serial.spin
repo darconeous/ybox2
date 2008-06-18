@@ -68,7 +68,12 @@ PUB rxcheck
       listen(listenport)
 
   return tcp.readByteNonBlocking(_handle)
-
+{
+PUB rxdata(ptr,len)
+  if isConnected
+    return tcp.readData(handle,ptr,len)
+  return -1
+}
 PUB rxtime(ms) : rxbyte
   rxbyte:=-1
   if _handle=>0
@@ -90,7 +95,8 @@ PUB tx(txbyte)
 
 PUB txdata(ptr,len)
   if isConnected
-    tcp.writeData(handle,ptr,len)
+    return tcp.writeData(handle,ptr,len)
+  return -1
 
 PUB txxml(txbyte)
   case txbyte

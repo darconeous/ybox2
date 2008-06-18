@@ -236,6 +236,18 @@ PUB WriteWait(SCL, devSel, addrReg) : ackbit
    ackbit := Write(SCL, devSel | Xmit)
    Stop(SCL)
    return ackbit
+
+PUB blockRead(destaddr,addr_,count)
+  return ReadPage(BootPin, EEPROM, addr_, destaddr, count)
+
+PUB blockWrite(destaddr,srcaddr,count)
+  return WritePage(BootPin, EEPROM, destaddr, srcaddr, count)
+
+PUB busy
+  return WriteWait(BootPin,EEPROM,$8000)
+PUB bootstrapFromEEPROM(addr_,size)
+  abort -1
+  
 CON
 {{
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

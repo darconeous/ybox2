@@ -77,15 +77,15 @@ PUB init | LED_Conf
   LONG[RTCADDR]~
   LONG[BOOTTIMEADDR]~
          
-  subsyscog := cognew(@run, @LED_R)+1 
+  subsyscog := cognew(@run, @LED_R)+1
+  ifnot subsyscog
+    abort -1 
 '  StatusIdle
 
 PUB Stop
+  StatusOff
   if subsyscog
     cogstop(subsyscog~ - 1)
-  StatusOff
-  if modecog
-    cogstop(modecog~ - 1)
 PUB StatusOff
   lasterror~
   if modecog

@@ -97,13 +97,12 @@ CON { Keys for various stuff }
 DAT
 SettingsLock  byte      -1
 OBJ
-  eeprom : "Basic_I2C_Driver"
+  eeprom : "Fast_I2C_Driver"
+  'pause : "pause"
 PUB start
 {{ Initializes the object. Call only once. }}
   if(SettingsLock := locknew) == -1
     abort FALSE
-
-  eeprom.Initialize(eeprom#BootPin)
 
   ' If we don't have any environment variables, try to load the defaults from EEPROM
   ifnot size
@@ -112,11 +111,10 @@ PUB start
   return TRUE
 PUB revert | i, addr
 {{ Retrieves the settings from EEPROM, overwriting any changes that were made. }}  
+  'return
   lock
   addr := SettingsBottom & %11111111_10000000
-  repeat i from 0 to SettingsSize/EEPROMPageSize-1
-    eeprom.ReadPage(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset, addr, SettingsSize)
-    addr+=EEPROMPageSize
+  eeprom.blockRead(addr, addr+EEPROMOffset, SettingsSize)
   unlock
 PUB purge
 {{ Removes all settings. }}
@@ -131,14 +129,12 @@ PRI unlock
   lockclr(SettingsLock)
 PUB commit | addr, i
 {{ Commits current settings to EEPROM }}
+'  return
   lock
   addr := SettingsBottom & %11111111_10000000
-  eeprom.Initialize(eeprom#BootPin)
   repeat i from 0 to SettingsSize/EEPROMPageSize-1
-    if \eeprom.WritePage(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset, addr, EEPROMPageSize)
-      unlock
-      abort -1
-    repeat while eeprom.WriteWait(eeprom#BootPin, eeprom#EEPROM, addr+EEPROMOffset)
+    repeat while eeprom.busy
+    repeat while \eeprom.blockWrite(addr,addr+EEPROMOffset, EEPROMPageSize)
     addr+=EEPROMPageSize
   unlock
   return 0
