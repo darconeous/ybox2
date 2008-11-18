@@ -23,7 +23,8 @@ CON
   searchCmd         = 5 << 16
   crc8Cmd           = 6 << 16
 
-  SEARCH_ROM        = $F0
+  CMD_SEARCH_ROM    = $F0
+  CMD_SEARCH_ALARM  = $EC
   
 VAR
 
@@ -70,7 +71,7 @@ PUB readByte
 PUB readBits(n)
   return sendCmd(readCmd + @n)
           
-PUB search(f, n, p)
+PUB search(f, n, p, cmd)
   return sendCmd(searchCmd + @f)
 
 PUB crc8(n, p)
@@ -185,6 +186,9 @@ cmd_search              rdlong  addrL, t2 wz            ' get family code
                         add     t2, #4                  ' get data pointer
                         rdlong  dataPtr, t2
                         mov     dataCnt, #0             ' clear address count
+
+                        add     t2, #4                  ' Get search command
+                        rdlong  searchCommand, t2
                         
 :nextAddr               call    #_reset                 ' reset the network                       
                         cmp     value, #0 wz            ' exit if no presence
@@ -194,7 +198,7 @@ cmd_search              rdlong  addrL, t2 wz            ' get family code
                         mov     addr, addrL             ' get address bits
                         mov     searchMask, #1          ' set search mask
 
-                        mov     value, #SEARCH_ROM      ' send search ROM command
+                        mov     value, searchCommand '#SEARCH_ROM      ' send search ROM command
                         call    #_writeByte
 
 :nextBit                mov     bitCnt, #2              ' read two bits
@@ -387,6 +391,7 @@ value                   res     1                       ' data value / return va
 dataPtr                 res     1                       ' data pointer
 dataCnt                 res     1                       ' data count
 dataMax                 res     1                       ' maximum data count
+searchCommand           res     1
 
 searchBit               res     1                       ' current search bit
 searchMask              res     1                       ' search mask

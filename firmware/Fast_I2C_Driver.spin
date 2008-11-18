@@ -17,20 +17,23 @@ CON
 DAT
 cog           long 0
 command       long 0
-OBJ
-  pause : "pause"
         
 PUB start(scl)
-'  mask_scl := |< scl
-'  mask_sda := |< (scl+1)
+  mask_scl := |< scl
+  mask_sda := |< (scl+1)
 
+  dira&=!(mask_scl|mask_sda)
+  outa&=!(mask_scl|mask_sda)
+
+{
   mask_scl := 1<<scl
   mask_sda := 1<<(scl+1)
-
   dira[scl]~
   dira[scl+1]~
   outa[scl]~
   outa[scl+1]~
+}
+  
 
   stop
   command~~
@@ -62,23 +65,21 @@ PUB setcommand(cmd, arg0_, arg1_)
 PUB bootstrapFromEEPROM(addr_,size)|device
   ifnot cog
     start(28)
-  device:=EEPROM
-  device |= addr_ >> 15 & %1110
+  device := EEPROM | (addr_ >> 15 & %1110)
   repeat while busy
-  setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
-  setcommand(CMD_WRITE_BYTE,addr_>>8,0)
-  setcommand(CMD_WRITE_BYTE,addr_,0)
+  setcommand(CMD_BEGIN,device|Xmit,0)
+  setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
+  setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
   setcommand(CMD_BEGIN,device|Recv,0)
   setcommand(CMD_READ|CMD_BOOTSTRAP,0,size)
 
 PUB blockRead(destaddr,addr_,count): ackBit|device
   ifnot cog
     start(28)
-  device:=EEPROM
-  device |= addr_ >> 15 & %1110
+  device := EEPROM | (addr_ >> 15 & %1110)
   ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Xmit,0)
-  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_>>8,0)
-  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_,0)
+  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
+  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
   ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Recv,0)
   ackbit := (ackbit << 1) | setcommand(CMD_READ|CMD_END,destaddr,count)
   if ackbit
@@ -86,11 +87,10 @@ PUB blockRead(destaddr,addr_,count): ackBit|device
 PUB blockWrite(srcaddr,destaddr,count): ackBit|device
   ifnot cog
     start(28)
-  device:=EEPROM
-  device |= destaddr >> 15 & %1110
+  device := EEPROM | (destaddr >> 15 & %1110)
   ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Xmit,0)
-  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,(destaddr>>8) & $FF,0)
-  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr & $FF,0)
+  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[1],0)
+  ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[0],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE|CMD_END,srcaddr,count)
 
   if ackbit
@@ -186,16 +186,16 @@ ee_start                mov     bits,#9                 '1      ready 9 start at
 :loop                   andn    outa,mask_scl           '1(!)   ready scl low
                         or      dira,mask_scl           '1!     scl low
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         andn    dira,mask_sda           '1!     sda float
                         call    #delay5                 '5
-                        call    #delay5                 '4
-                        call    #delay5                 '5
+'                        call    #delay5                 '4
+'                        call    #delay5                 '5
                         or      outa,mask_scl           '1!     scl high
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
         if_nc           djnz    bits,#:loop             '1,2    if sda not high, loop until done
 
@@ -220,13 +220,13 @@ ee_tr                   mov     bits,#9                 '1      transmit/receive
                         rcl     eedata,#1               '1      shift in prior sda input state
                         muxz    dira,mask_sda           '1!     sda low/float
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
                         or      outa,mask_scl           '1!     scl high
                         call    #delay5                 '4
-                        call    #delay5                 '4
-                        call    #delay5                 '4
+'                        call    #delay5                 '4
+'                        call    #delay5                 '4
                         djnz    bits,#:loop             '1,2    if another bit, loop
 
                         and     eedata,#$FF             '1      isolate byte received

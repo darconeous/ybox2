@@ -22,7 +22,8 @@ OBJ
   socket        : "api_telnet_serial"
   http          : "http"
   base64        : "base64"
-  auth          : "auth_digest"                                   
+  auth          : "auth_digest"
+  sony_out      : "ir_transmit_sony"                                
 VAR
   long stack[100] 
   byte stage_two
@@ -44,6 +45,7 @@ PUB init | i
   hits:=0
   settings.start
   numbers.init
+  sony_out.init(25)
   
   ' If you aren't using this thru the bootloader, set your
   ' settings here. 
@@ -143,7 +145,20 @@ PUB showMessage(str)
 
 PRI delay_ms(Duration)
   waitcnt(((clkfreq / 1_000 * Duration - 3932)) + cnt)
+PUB atoi(inptr):retVal | i,char
+  retVal~
   
+  ' Skip leading whitespace
+  repeat while BYTE[inptr] AND BYTE[inptr]==" "
+    inptr++
+   
+  repeat 10
+    case (char := BYTE[inptr++])
+      "0".."9":
+        retVal:=retVal*10+char-"0"
+      OTHER:
+        quit
+           
 VAR
   byte httpMethod[8]
   byte httpPath[64]
@@ -171,7 +186,7 @@ pri httpUnauthorized(authorized)
   socket.str(@CR_LF)
   socket.str(@HTTP_401)
 
-pub httpServer | char, i, contentLength,authorized,queryPtr
+pub httpServer | char, i, contentLength,authorized,queryPtr, tmp1, tmp2, tmp3
 
   repeat
     repeat while \socket.listen(80) == -1
@@ -256,6 +271,24 @@ pub httpServer | char, i, contentLength,authorized,queryPtr
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.str(@CR_LF)
         subsys.click
+        socket.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/sony"))
+        socket.str(@HTTP_303)
+        socket.str(string("Location: /",13,10))
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        tmp1~
+        tmp2~
+        tmp3:=3
+        if http.getFieldFromQuery(queryPtr,string("addr"),@buffer,127)
+          tmp2:=atoi(@buffer)
+        if http.getFieldFromQuery(queryPtr,string("cmd"),@buffer,127)
+          tmp1:=atoi(@buffer)
+        if http.getFieldFromQuery(queryPtr,string("r"),@buffer,127)
+          tmp3:=atoi(@buffer)&255
+        
+        repeat tmp3
+          sony_out.sendCode(tmp1,tmp2)
         socket.str(string("OK",13,10))
       elseif strcomp(@httpPath,string("/toggle"))
         socket.str(@HTTP_303)

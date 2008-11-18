@@ -99,7 +99,7 @@ OBJ
   settings      : "settings"
   random        : "RealRandom"
   http          : "http"
-  auth          : "auth_basic"                                   
+  auth          : "auth_digest"                                   
   md5           : "MD5"
   base16        : "base16"
   pause         : "pause"
@@ -1191,21 +1191,21 @@ pub downloadFirmwareHTTP(contentLength) | timeout, retrydelay,in, i, total, addr
           repeat j from i to $8000-settings#SettingsSize step 128
             subsys.StatusSolid(0,0,128)
             repeat while fast_eeprom.busy
-            if \fast_eeprom.blockWrite(@buffer,j, 128)
-              abort -9
+            repeat while \fast_eeprom.blockWrite(@buffer,j, 128)
+            '  abort -9
             subsys.StatusSolid(0,128,0)
             term.out(".")
         else
           repeat while fast_eeprom.busy
-          if \fast_eeprom.blockWrite(@buffer,total+addr, 128)
-            abort -8
+          repeat while \fast_eeprom.blockWrite(@buffer,total+addr, 128)
+          '  abort -8
           ' Now we need to fill in the rest of the image with zeros.
           bytefill(@buffer,0,128)
           repeat j from total+128 to $8000-settings#SettingsSize-1 step 128
             subsys.StatusSolid(0,0,128)
             repeat while fast_eeprom.busy
-            if \fast_eeprom.blockWrite( @buffer,j+addr, 128)
-              abort -9
+            repeat while \fast_eeprom.blockWrite( @buffer,j+addr, 128)
+            '  abort -9
             subsys.StatusSolid(0,128,0)
             term.out(".")
 
@@ -1418,7 +1418,7 @@ smode                   long    0
 h8000                   long    $8000
 programsize             long    $8000-settings#SettingsSize
 interpreter             long    $0001 << 18 + $3C01 << 4 + %0000
-}
+
 '
 '
 ' Variables
@@ -1429,3 +1429,5 @@ raddress                res     1
 count                   res     1
 bits                    res     1
 eedata                  res     1
+
+}

@@ -1,13 +1,11 @@
 {{
-        ybox2 - Webserver Example
+        ybox2 - One-Wire Bridge
         http://www.deepdarc.com/ybox2
 
         ABOUT
 
-        This example demonstrates how to make a ybox2
-        program which has a web page which allows you to
-        do things like change the color of the LED,
-        make noises, etc.        
+        This is a simple HTTP interface to
+        a one-wire bus.
 }}
 CON
 
@@ -26,7 +24,6 @@ OBJ
   http          : "http"
   base16        : "base16"
   auth          : "auth_digest"
-'  numbers       : "numbers"
   ow            : "OneWire"
   fp            : "FloatString"
   f             : "FloatMath"                           ' could also use Float32
@@ -238,6 +235,12 @@ pub httpServer | char, i, contentLength,authorized,queryPtr,tempC,tempF
         socket.close
         delay_ms(100)
         reboot
+      elseif strcomp(@httpPath,string("/alarm"))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONTENT_TYPE_HTML)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        deviceTable(0,ow#CMD_SEARCH_ALARM)
       elseif strcomp(@httpPath,string("/temp"))
         if byte[queryPtr]
           base16.inplaceDecode(queryPtr)
@@ -257,6 +260,12 @@ pub httpServer | char, i, contentLength,authorized,queryPtr,tempC,tempF
         socket.dec(subsys.rtc)
         socket.str(string(", "))
         socket.str(fp.FloatToString(tempC))
+        socket.str(string(", "))
+        socket.hex(ow.readByte,2)
+        socket.str(string(", "))
+        socket.hex(ow.readByte,2)
+        socket.str(string(", "))
+        socket.hex(ow.readByte,2)
         socket.str(@CR_LF)
         
          
@@ -316,7 +325,10 @@ pri indexPage | i, tempF, tempC, p
   socket.str(string("</tt></div>"))
 }
 
-  i := ow.search(0, MAX_DEVICES, @addressList)          ' search the 1-wire network
+  deviceTable(0,ow#CMD_SEARCH_ROM)
+
+{
+  i := ow.search(0, MAX_DEVICES, @addressList,ow#CMD_SEARCH_ROM)          ' search the 1-wire network
   socket.str(string("<div><tt>Devices Found: "))
   socket.dec(i)
   socket.str(string("</tt></div>"))
@@ -340,6 +352,7 @@ pri indexPage | i, tempF, tempC, p
     p += 8
     socket.str(string("</tt></th><tr>"))
   socket.str(string("</tbody></table>"))
+}
    
   {
   socket.str(string("<h2>Actions</h2>"))
@@ -356,6 +369,33 @@ pri indexPage | i, tempF, tempC, p
 
   'term.str(string("Index page sent!",13))
 
+PUB deviceTable(family, command)| i,p
+  i := ow.search(family, MAX_DEVICES, @addressList,command)          ' search the 1-wire network
+  socket.str(string("<div><tt>Devices Found: "))
+  socket.dec(i)
+  socket.str(string("</tt></div>"))
+  
+  p := @addressList
+  socket.str(string("<table><thead><tr><th>Type</th><th>ROM Code</th></tr></thead><tbody>"))
+  repeat i 
+    socket.str(string("<tr><th>"))
+    case byte[p]                                        ' display family name
+      $01:    socket.str(@ds2401_name)
+      $05:    socket.str(@ds2405_name)
+      $10,$28,$22:
+        socket.str(string("<a href='/temp?"))
+        httpOutputROMCode(p)
+        socket.str(string("'>DS1820</a>"))
+      other:  socket.str(string("Unknown "))
+    socket.str(string("</th><th><tt>"))
+    httpOutputROMCode(p)
+    if ow.crc8(8, p) <> 0                               ' check crc of address
+      socket.str(string("?crc"))
+    p += 8
+    socket.str(string("</tt></th><tr>"))
+  socket.str(string("</tbody></table>"))
+
+
 DAT
 ds2401_name     byte    "DS2401 ", 0
 ds2405_name     byte    "DS2405 ", 0 
@@ -367,8 +407,12 @@ CON
   MATCH_ROM          = $55                               ' 1-wire commands
   SKIP_ROM          = $CC                               ' 1-wire commands
   READ_SCRATCHPAD   = $BE
+  WRITE_SCRATCHPAD   = $4E
+  COPY_SCRATCHPAD   = $48
+  REVERT_SCRATCHPAD   = $B8
   CONVERT_T         = $44
-
+  POWER_SUPPLY    = $B4
+  
 PUB selectDevice(p)
   ow.reset                                              ' send convert temperature command
   ow.writeByte(MATCH_ROM)
@@ -388,10 +432,39 @@ PUB convertTemperature
     waitcnt(cnt+clkfreq/1000*25)
     if ow.readBits(1)
       quit
-
-PUB getTemperature : temp
+PUB getScratchpad(ptr,len)
   ow.writeByte(READ_SCRATCHPAD)
-  temp := ow.readByte + ow.readByte << 8                ' read temperature
+  repeat len
+    BYTE[ptr++]:=ow.readByte
+
+PUB setAlarmTemps(hi,lo)
+  ow.writeByte(WRITE_SCRATCHPAD)
+  ow.writeByte(hi.byte[1])
+  ow.writeByte(lo.byte[1])
+  ow.writeByte(%0_11_11111)
+
+PUB commitAlarmTemps
+  ow.writeByte(COPY_SCRATCHPAD)
+  dira[OW_PIN]~~
+  delay_ms(10)
+  dira[OW_PIN]~
+
+PUB revertAlarmTemps
+  ow.writeByte(REVERT_SCRATCHPAD)
+  
+  
+PUB TempToFloat(temp)
+  return F.FDiv(F.FFloat(temp), 16.0)
+
+PUB isParasitePowered
+  ow.writeByte(POWER_SUPPLY)
+  return NOT ina[OW_PIN]
+  
+PUB getTemperature : temp
+  getScratchpad(@temp,2)
+  'ow.writeByte(READ_SCRATCHPAD)
+  'temp := ow.readByte + ow.readByte << 8                ' read temperature
   temp := ( temp << 16 ) ~> 16
-  temp := F.FDiv(F.FFloat(temp), 16.0)                  ' convert to floating point
+  temp := TempToFloat(temp)
+'  temp := F.FDiv(F.FFloat(temp), 16.0)                  ' convert to floating point
   
