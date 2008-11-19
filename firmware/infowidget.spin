@@ -180,7 +180,7 @@ PUB init | i
 PRI initial_configuration
 
   settings.setString(settings#SERVER_HOST,string("propserve.fwdweb.com"))  
-  settings.setData(settings#SERVER_IPv4_ADDR,string(208,131,149,67),4)
+  settings.setData(settings#SERVER_IPv4_ADDR,string(72,14,176,143),4)
   settings.setWord(settings#SERVER_IPv4_PORT,80)
   settings.setString(settings#SERVER_PATH,string("/?zipcode=95008"))
 {
@@ -191,72 +191,6 @@ PRI initial_configuration
 }
   return TRUE
   
-{{
-PUB main
-  'delay_ms(1000) ' Wait a second to let the ethernet stabalize
-
-  'cognew(WeatherUpdate, @weatherstack) 
-  'repeat
-  'delay_ms(5000) ' Wait a second to let the ethernet stabalize
-  
-  \httpServer
-
-  subsys.StatusFatalError
-  SadChirp
-  reboot
-    
-  return
-  
-  repeat while true
-    ircode:=ir.fifo_get
-    if ircode <> -1
-      term.str(string($1,$B,12,$C,$1,"IR CODE: KC="))       
-      term.hex(ircode,2)
-      term.str(string(" ID="))
-      term.hex(ir.fifo_get_lastvalid,4)
-      term.str(string($C,$8))       
-    if ina[subsys#BTTNPin]
-      showMessage(string("BUTTON PRESSED"))    
-      subsys.StatusFatalError
-      SadChirp
-      repeat while ina[subsys#BTTNPin]
-      showMessage(string("BUTTON RELEASED"))    
-      subsys.StatusIdle
-      HappyChirp
-    if ircode == $0E
-      showMessage(string("Rebooting..."))    
-      outa[0]:=0
-      dira[0]:=1
-      subsys.StatusFatalError
-      SadChirp
-      reboot
-    if ircode == $0F
-      term.stop
-      term.start(12)
-    if ircode == $64
-      if settings.findKey(settings#MISC_SOUND_DISABLE) == FALSE
-        showMessage(string("[MUTED]"))    
-        settings.setByte(settings#MISC_SOUND_DISABLE,TRUE)
-        dira[subsys#SPKRPin]:=0       
-        ir.fifo_flush
-      else
-        showMessage(string("[UNMUTED]"))    
-        settings.removeKey(settings#MISC_SOUND_DISABLE)
-        dira[subsys#SPKRPin]:=1       
-        HappyChirp
-        ir.fifo_flush
-    if ircode == $35
-'      ether.wr_phy(ether#PHLCON,%0000_1010_1011_0000)
-'      ether.wr_phy(ether#PHCON2,%0100_0000_0000_0000)
-    if ircode == $32
-'      ether.wr_phy(ether#PHLCON,%0000_1010_1011_0000)
-    if ircode == $00
-      subsys.StatusLoading
-    if ircode == $01
-      subsys.StatusIdle
-    if ircode == $02
-      subsys.StatusFatalError
-}}    
 
 CON
   WEATHER_SUCCESS = 860276
