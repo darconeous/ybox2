@@ -39,27 +39,6 @@ pub init(pin)
   DIRA[IRPin]~
   CTRB := constant(%00100 << 26) | IRPin                
   FRQB := fraction(CARRIER_FREQ, CLKFREQ, 1)                               
-{  SynthFreq(IRPin,CARRIER_FREQ)
-PRI SynthFreq(Pin, Freq) | s, d, ctr, frq
-
-  Freq := Freq #> 0 <# 128_000_000     'limit frequency range
-  
-  if Freq < 500_000                    'if 0 to 499_999 Hz,
-    ctr := constant(%00100 << 26)      '..set NCO mode
-    s := 1                             '..shift = 1
-  else                                 'if 500_000 to 128_000_000 Hz,
-    ctr := constant(%00010 << 26)      '..set PLL mode
-    d := >|((Freq - 1) / 1_000_000)    'determine PLLDIV
-    s := 4 - d                         'determine shift
-    ctr |= d << 23                     'set PLLDIV
-    
-  frq := fraction(Freq, CLKFREQ, s)    'Compute FRQA/FRQB value
-  ctr |= Pin                           'set PINA to complete CTRA/CTRB value
-
-  CTRA := ctr                        'set CTRA
-  FRQA := frq                        'set FRQA                   
-  DIRA[Pin]~~                        'make pin output
-}
 PRI fraction(a, b, shift) : f
 
   if shift > 0                         'if shift, pre-shift a or b left
