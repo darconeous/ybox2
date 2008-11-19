@@ -279,8 +279,12 @@ PRI resetSettings | key, nextKey, ledconf
   while (key:=nextKey)
 
   settings.commit
-PRI LEDConfIsSane(ledconf)
-  return NOT (((ledconf>>16)&%11111) < 8 OR ((ledconf>>8)&%11111) < 8 OR (ledconf&%11111) < 8)
+PRI LEDConfIsSane(ledconf) | i,pin
+  repeat i from 0 to 17 step 8
+    pin := ((ledconf>>i)&%11111)
+    if ((1<<pin) & %1111_0000_0000_0000_0000_0000_1111_1111) OR pin == subsys#BTTNPin
+      return false
+  return true
   
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE2,TRUE)
