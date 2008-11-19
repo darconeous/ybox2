@@ -798,7 +798,7 @@ PUB closeall | handle
     
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise
-  if (handle => 2) OR (handle < 0)
+  if (handle => sNumSockets) OR (handle < 0)
     abort -111
   handle_addr := @sSockets + (sSocketBytes * handle)
   if BYTE[handle_addr + sConState] == SESTABLISHED
@@ -814,7 +814,7 @@ PUB isValidHandle(handle) | handle_addr
 '' Checks to see if the handle is valid, handles will become invalid once they are used
 '' In other words, a closed listening socket is now invalid, etc
 
-  if (handle => 2) OR (handle < 0)
+  if (handle => sNumSockets) OR (handle < 0)
     return false
 
   handle_addr := @sSockets + (sSocketBytes * handle)
