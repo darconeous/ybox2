@@ -1135,7 +1135,7 @@ PRI compose_bootp(op,hops,xid,secs,ciaddr_ptr,yiaddr_ptr,siaddr_ptr,giaddr_ptr)
 
 '  nic.wr_frame_pad(128) ' file (empty)
 
-PRI send_dhcp_request | i, pkt_len
+PRI send_dhcp_request | i, pkt_len,hdr_chksum
   nic.start_frame
 
   ip_dhcp_xid++
@@ -1162,10 +1162,20 @@ PRI send_dhcp_request | i, pkt_len
   nic.wr_frame_byte($01)
   nic.wr_frame_data(@local_macaddr,HW_ADDR_LEN)
 
+  ' DHCP MSZ
+  nic.wr_frame_byte(57)
+  nic.wr_frame_byte(constant(2))
+  nic.wr_frame_word(1500)
+
+  ' DHCP Lease Time
+  nic.wr_frame_byte(51)
+  nic.wr_frame_byte(constant(4))
+  nic.wr_frame_long(7776000)
+
   ' End of vendor data
   nic.wr_frame_byte($FF)
 
-  nic.wr_frame_pad(47)
+  nic.wr_frame_pad(30)
 
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
@@ -1233,12 +1243,13 @@ PRI dhcp_offer_response | i, ptr
   ' End of vendor data
   nic.wr_frame_byte($FF)
 
-  nic.wr_frame_pad(30) ' Padding
+  nic.wr_frame_pad(22) ' Padding
 
   nic.calc_frame_udp_length
   nic.calc_frame_ip_checksum
   
   'UDP Checksum, which is optional. Leaving it out because it isn't finished.
+  'Not a problem, because in UDP the checksum is optional.
   'nic.calc_frame_udp_checksum
 
   return nic.send_frame
