@@ -98,7 +98,6 @@ DAT
 SettingsLock  byte      -1
 OBJ
   eeprom : "Fast_I2C_Driver"
-  'pause : "pause"
 PUB start
 {{ Initializes the object. Call only once. }}
   if(SettingsLock := locknew) == -1
@@ -109,12 +108,18 @@ PUB start
     revert
 
   return TRUE
-PUB revert | i, addr
+PUB revert : ack | i, addr,startCnt
 {{ Retrieves the settings from EEPROM, overwriting any changes that were made. }}  
-  'return
   lock
+  startCnt := cnt
   addr := SettingsBottom & %11111111_10000000
-  eeprom.blockRead(addr, addr+EEPROMOffset, SettingsSize)
+  repeat while eeprom.busy
+    ' If we wait longer than one second,
+    ' then abort. Let the caller figure out
+    ' what to do in this case.
+    if (cnt-startCnt) > clkfreq
+      abort -5
+  ack := eeprom.blockRead(addr, addr+EEPROMOffset, SettingsSize)
   unlock
 PUB purge
 {{ Removes all settings. }}
@@ -127,14 +132,21 @@ PRI lock
   repeat while NOT lockset(SettingsLock)
 PRI unlock
   lockclr(SettingsLock)
-PUB commit | addr, i
+PUB commit:ack | addr, i, startCnt
 {{ Commits current settings to EEPROM }}
-'  return
   lock
+  startCnt := cnt
   addr := SettingsBottom & %11111111_10000000
   repeat i from 0 to SettingsSize/EEPROMPageSize-1
     repeat while eeprom.busy
-    repeat while \eeprom.blockWrite(addr,addr+EEPROMOffset, EEPROMPageSize)
+      ' If we wait longer than one second,
+      ' then abort. Let the caller figure out
+      ' what to do in this case.
+      if (cnt-startCnt) > clkfreq
+        abort -5
+
+    eeprom.blockWrite(addr,addr+EEPROMOffset, EEPROMPageSize)
+
     addr+=EEPROMPageSize
   unlock
   return 0
@@ -261,21 +273,3 @@ PUB getByte(key): retVal
   
 PUB setByte(key,value)
   return setData(key,@value,1)
-CON
-{{
-┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                   TERMS OF USE: MIT License                                                  │                                                            
-├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation    │ 
-│files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,    │
-│modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software│
-│is furnished to do so, subject to the following conditions:                                                                   │
-│                                                                                                                              │
-│The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.│
-│                                                                                                                              │
-│THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE          │
-│WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR         │
-│COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,   │
-│ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                         │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-}}

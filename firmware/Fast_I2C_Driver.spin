@@ -1,4 +1,4 @@
-{ WORK IN PROGRESS. UNSTABLE. DON'T USE YET. }
+{ WORK IN PROGRESS. }
 CON
   ACK      = 0                        ' I2C Acknowledge
   NAK      = 1                        ' I2C No Acknowledge
@@ -21,19 +21,12 @@ command       long 0
 PUB start(scl)
   mask_scl := |< scl
   mask_sda := |< (scl+1)
+  _start
+
+PRI _start
 
   dira&=!(mask_scl|mask_sda)
   outa&=!(mask_scl|mask_sda)
-
-{
-  mask_scl := 1<<scl
-  mask_sda := 1<<(scl+1)
-  dira[scl]~
-  dira[scl+1]~
-  outa[scl]~
-  outa[scl+1]~
-}
-  
 
   stop
   command~~
@@ -44,15 +37,16 @@ PUB start(scl)
     abort -1
 
   repeat while command
-  repeat while busy
+  reset
   
 PUB stop
   if cog
     cogstop(cog~ - 1)
   command~
 
-PUB setcommand(cmd, arg0_, arg1_)
+PUB setcommand(cmd, arg0_, arg1_):startCnt
   command := cmd << 16 + @arg0_                       'write command and pointer
+  startCnt := cnt
 
   if cmd & CMD_BOOTSTRAP
     ' If this was a bootstrap command,
@@ -60,43 +54,51 @@ PUB setcommand(cmd, arg0_, arg1_)
     cogstop(cogid)
 
   repeat while command                                'wait for command to be cleared, signifying receipt
+    if (cnt-startCnt) > clkfreq
+      stop
+      abort -100
   return arg0_
   
 PUB bootstrapFromEEPROM(addr_,size)|device
-  ifnot cog
-    start(28)
+  reset
   device := EEPROM | (addr_ >> 15 & %1110)
-  repeat while busy
-  setcommand(CMD_BEGIN,device|Xmit,0)
+  repeat while setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
   setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
   setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
-  setcommand(CMD_BEGIN,device|Recv,0)
+  setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Recv,0)
   setcommand(CMD_READ|CMD_BOOTSTRAP,0,size)
 
 PUB blockRead(destaddr,addr_,count): ackBit|device
-  ifnot cog
-    start(28)
+  reset
   device := EEPROM | (addr_ >> 15 & %1110)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Xmit,0)
+  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Recv,0)
+  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Recv,0)
   ackbit := (ackbit << 1) | setcommand(CMD_READ|CMD_END,destaddr,count)
   if ackbit
     abort ackbit
 PUB blockWrite(srcaddr,destaddr,count): ackBit|device
-  ifnot cog
-    start(28)
+  reset
   device := EEPROM | (destaddr >> 15 & %1110)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN,device|Xmit,0)
+  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[1],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[0],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE|CMD_END,srcaddr,count)
 
   if ackbit
     abort ackbit
-PUB busy
-  return setcommand(CMD_BEGIN,EEPROM|Recv,0)
+PUB reset
+  ifnot cog
+    _start
+  setcommand(CMD_BEGIN|CMD_WRITE_BYTE,$FF,0)
+  setcommand(CMD_BEGIN|CMD_END,0,0)
+ 
+PUB busy:isBusy
+  reset
+  if (isBusy := setcommand(CMD_BEGIN|CMD_WRITE_BYTE,EEPROM|Recv,0))
+    setcommand(CMD_END,0,0)
+    
 
 DAT
               org
@@ -132,6 +134,8 @@ loop          wrlong  zero,par                          'zero command (tell spin
         if_nz jmp    #launch
 
         if_nc wrlong zero,addr
+
+              call      #delay_1usec
         
 error
               jmp #loop                                 ' no cmd found
@@ -185,17 +189,11 @@ read__ret     ret
 ee_start                mov     bits,#9                 '1      ready 9 start attempts
 :loop                   andn    outa,mask_scl           '1(!)   ready scl low
                         or      dira,mask_scl           '1!     scl low
-                        call    #delay5                 '4
-'                        call    #delay5                 '4
-'                        call    #delay5                 '4
+                        call    #delay_1usec                 '4
                         andn    dira,mask_sda           '1!     sda float
-                        call    #delay5                 '5
-'                        call    #delay5                 '4
-'                        call    #delay5                 '5
+                        call    #delay_1usec                 '5
                         or      outa,mask_scl           '1!     scl high
-                        call    #delay5                 '4
-'                        call    #delay5                 '4
-'                        call    #delay5                 '4
+                        call    #delay_1usec                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
         if_nc           djnz    bits,#:loop             '1,2    if sda not high, loop until done
 
@@ -203,6 +201,9 @@ ee_start                mov     bits,#9                 '1      ready 9 start at
 
                         or      dira,mask_sda           '1!     sda low
 
+                        call    #delay_1usec                 '4
+ee_start_ret            
+                        ret '1 nc=ack
 
 '
 '
@@ -219,33 +220,28 @@ ee_tr                   mov     bits,#9                 '1      transmit/receive
                         andn    outa,mask_scl           '1!     scl low
                         rcl     eedata,#1               '1      shift in prior sda input state
                         muxz    dira,mask_sda           '1!     sda low/float
-                        call    #delay5                 '4
-'                        call    #delay5                 '4
-'                        call    #delay5                 '4
+                        call    #delay_1usec                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
                         or      outa,mask_scl           '1!     scl high
-                        call    #delay5                 '4
-'                        call    #delay5                 '4
-'                        call    #delay5                 '4
+                        call    #delay_1usec                 '4
                         djnz    bits,#:loop             '1,2    if another bit, loop
 
                         and     eedata,#$FF             '1      isolate byte received
 ee_receive_ret
 ee_transmit_ret         
-ee_start_ret            
                         ret '1 nc=ack
 '
 ' Stop
 '
 ee_stop                 mov     bits,#9                 '1      ready 9 stop attempts
 :loop                   andn    outa,mask_scl           '1!     scl low
-                        call    #delay5                 '4
+                        call    #delay_1usec                 '4
                         or      dira,mask_sda           '1!     sda low
-                        call    #delay5                 '5
+                        call    #delay_1usec                 '5
                         or      outa,mask_scl           '1!     scl high
-                        call    #delay3                 '3
+                        call    #delay_1usec                 '3
                         andn    dira,mask_sda           '1!     sda float
-                        call    #delay4                 '4
+                        call    #delay_1usec                 '4
                         test    mask_sda,ina    wc      'h?h    sample sda
         if_nc           djnz    bits,#:loop             '1,2    if sda not high, loop until done
 
@@ -256,6 +252,12 @@ ee_stop_ret             ret                             '1
 '
 ' Cycle delays
 '
+
+delay_1usec             mov     delay_count,#17
+:loop                   djnz    delay_count,#:loop
+delay_1usec_ret         ret
+
+{
 delay5                  nop                             '1
                         nop                             '1
                         nop                             '1
@@ -280,11 +282,14 @@ delay2_ret
 delay3_ret
 delay4_ret
 delay5_ret              ret                             '1
+}
 
 '
 '
 ' Constants
 '
+delay_count             long    0   
+
 time_xtal               long    20 * 20000 / 4 / 1      '20ms (@20MHz, 1 inst/loop)
 zero                    long    0
 smode                   long    0
