@@ -273,7 +273,7 @@ PRI resetSettings | key, nextKey, ledconf
           ' If we are less than the expected size, kill it
           settings.removeKey(key)
         elseifnot LEDConfIsSane(ledconf)
-          ' Make sure no pin assignments are less than 8
+          ' Make sure no pin assignments are insane
           settings.removeKey(key)
       other: settings.removeKey(key)
   while (key:=nextKey)
@@ -289,8 +289,12 @@ PRI LEDConfIsSane(ledconf) | i,pin
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE2,TRUE)
  
-  outa[0]~ ' Pull ethernet reset pin low, starting a reset condition.
+  ' Pull ethernet reset pin low, starting a reset condition.
+  ' TODO: Have this send a reset command instead!
+  ' XXX: Is this really necessary?
+  outa[0]~ 
 
+  ' XXX: Is this really necessary?
   if stage_two
     ' If we are already in stage 2, forget it... just reboot.
     reboot
@@ -567,8 +571,8 @@ pub httpServer | i,j,contentLength,authorized,stale,queryptr
           contentLength--
         buffer[i]~
         buffer2[0]~
-
-        if (i:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2,PASSWORD_MAX)) < PASSWORD_MIN
+        i:=http.getFieldFromQuery(@buffer,string("pwd1"),@buffer2,PASSWORD_MAX)
+        if i and (i < PASSWORD_MIN)
           websocket.str(@HTTP_VERSION)
           websocket.str(@HTTP_400)
           websocket.str(@HTTP_CONNECTION_CLOSE)
