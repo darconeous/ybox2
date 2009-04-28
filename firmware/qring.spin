@@ -3,7 +3,7 @@
 }}
 CON {{ Tweakable constants }}
   Q_MAX = 4
-  Q_BITS = 8
+  Q_BITS = 7
 CON {{ Non-tweakable constants }}
   Q_SIZE = 1<<Q_BITS   ' MUST BE A POWER OF TWO
   buffer_mask   = Q_SIZE - 1

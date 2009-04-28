@@ -170,6 +170,9 @@ pub generateChallenge(dest,len,authstate)|nonce[NONCE_LENGTH/4]
   return 0
 
 pub setAdminPassword(str)
-  settings.setString(settings#MISC_PASSWORD,str)
+  if byte[str]
+    settings.setString(settings#MISC_PASSWORD,str)
+  else
+    settings.removeKey(settings#MISC_PASSWORD)
   settings.commit
          

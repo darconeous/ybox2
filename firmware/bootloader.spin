@@ -116,9 +116,6 @@ productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE     "http://ladyada.net/make/ybox2/",0
 
 PUB init | i, tv_mode
-  dira[0]~~ ' Set direction on reset pin
-  outa[0]~ ' Set state on reset pin to LOW
-
   ' Default to NTSC
   tv_mode:=term#MODE_NTSC
   
@@ -154,15 +151,18 @@ PUB init | i, tv_mode
   printBanner
 
   if NOT stage_two AND settings.findKey(settings#MISC_AUTOBOOT)
+    term.str(string("Autoboot..."))
     pause.delay_ms(2000)
     if NOT ina[subsys#BTTNPin]
       boot_stage2
     else
+      term.out($0A)
+      term.out($00)  
       term.str(string("Autoboot Aborted.",13))
       subsys.chirpSad    
 
   ifnot settings.findKey(settings#NET_MAC_ADDR)
-    if initial_configuration <> 1
+    if \initial_configuration <> 1
       term.str(string("Initial configuration failed!",13))
       subsys.StatusFatalError
       subsys.chirpSad
@@ -170,7 +170,7 @@ PUB init | i, tv_mode
     else
       subsys.chirpHappy
       pause.delay_ms(2000)
-      reboot
+    reboot
 
   ' Init the auth object with some randomness
   random.start
@@ -178,14 +178,16 @@ PUB init | i, tv_mode
   random.stop
 
   ' Print out the MAC address on the TV
+  term.str(string("MAC: "))  
   if settings.getData(settings#NET_MAC_ADDR,@stack,6)
-    term.str(string("MAC: "))
     repeat i from 0 to 5
       if i
         term.out("-")
       term.hex(byte[@stack][i],2)
     term.out(13)  
-
+  else
+    term.str(string("???",13))
+  
   ' If the user is holding down the button, wait two seconds.
   repeat 10
     if ina[subsys#BTTNPin]
@@ -206,7 +208,6 @@ PUB init | i, tv_mode
       subsys.chirpHappy
       reboot
 
-  outa[0]~~ ' Pull ethernet reset pin high, ending the reset condition.
   if not \websocket.start(1,2,3,4,6,7)
     showMessage(string("Unable to start networking!"))
     subsys.StatusFatalError
@@ -289,11 +290,6 @@ PRI LEDConfIsSane(ledconf) | i,pin
 PRI boot_stage2 | i
   settings.setByte(settings#MISC_STAGE2,TRUE)
  
-  ' Pull ethernet reset pin low, starting a reset condition.
-  ' TODO: Have this send a reset command instead!
-  ' XXX: Is this really necessary?
-  outa[0]~ 
-
   ' XXX: Is this really necessary?
   if stage_two
     ' If we are already in stage 2, forget it... just reboot.
@@ -360,6 +356,10 @@ pri printBanner
     term.out($88)
   term.out($0c)
   term.out(0)
+DAT
+PALString     byte      "PAL",0
+NTSCString     byte     "NTSC",0
+ModeSelectedString     byte     " Mode Selected",13,0
 
 pri buttonCheck
   if ina[subsys#BTTNPin]
@@ -378,12 +378,13 @@ pri buttonCheck
         settings.setByte(settings#MISC_TV_MODE,term#MODE_PAL)
         term.startWithMode(12,term#MODE_PAL)
         printBanner
-        term.str(string("PAL Mode Selected",13))
+        term.str(PALString)
       else
         settings.setByte(settings#MISC_TV_MODE,term#MODE_NTSC)
         term.startWithMode(12,term#MODE_NTSC)
         printBanner
-        term.str(string("NTSC Mode Selected",13))
+        term.str(NTSCString)
+      term.str(ModeSelectedString)
 
       settings.commit
       subsys.chirpHappy
