@@ -108,17 +108,17 @@ PUB start
     revert
 
   return TRUE
-PUB revert : ack | i, addr,startCnt
+PUB revert : ack | i, addr',startCnt
 {{ Retrieves the settings from EEPROM, overwriting any changes that were made. }}  
   lock
-  startCnt := cnt
+  'startCnt := cnt
   addr := SettingsBottom & %11111111_10000000
   repeat while eeprom.busy
     ' If we wait longer than one second,
     ' then abort. Let the caller figure out
     ' what to do in this case.
-    if (cnt-startCnt) > clkfreq
-      abort -5
+    'if (cnt-startCnt) > clkfreq
+      'abort -5
   ack := eeprom.blockRead(addr, addr+EEPROMOffset, SettingsSize)
   unlock
 PUB purge
@@ -135,15 +135,15 @@ PRI unlock
 PUB commit:ack | addr, i, startCnt
 {{ Commits current settings to EEPROM }}
   lock
-  startCnt := cnt
+  'startCnt := cnt
   addr := SettingsBottom & %11111111_10000000
   repeat i from 0 to SettingsSize/EEPROMPageSize-1
     repeat while eeprom.busy
       ' If we wait longer than one second,
       ' then abort. Let the caller figure out
       ' what to do in this case.
-      if (cnt-startCnt) > clkfreq
-        abort -5
+      'if (cnt-startCnt) > clkfreq
+      '  abort -5
 
     eeprom.blockWrite(addr,addr+EEPROMOffset, EEPROMPageSize)
 

@@ -111,7 +111,7 @@ VAR
   byte hash[md5#HASH_LENGTH]
 DAT
 productName   BYTE      "ybox2 bootloader v"
-productVersion BYTE     "1.1a",0      
+productVersion BYTE     "1.1a806",0      
 productURL    BYTE      "http://www.deepdarc.com/ybox2/",0
 productURL2    BYTE     "http://ladyada.net/make/ybox2/",0
 
@@ -171,22 +171,6 @@ PUB init | i, tv_mode
       subsys.chirpHappy
       pause.delay_ms(2000)
     reboot
-
-  ' Init the auth object with some randomness
-  random.start
-  auth.init(random.random)
-  random.stop
-
-  ' Print out the MAC address on the TV
-  term.str(string("MAC: "))  
-  if settings.getData(settings#NET_MAC_ADDR,@stack,6)
-    repeat i from 0 to 5
-      if i
-        term.out("-")
-      term.hex(byte[@stack][i],2)
-    term.out(13)  
-  else
-    term.str(string("???",13))
   
   ' If the user is holding down the button, wait two seconds.
   repeat 10
@@ -207,6 +191,22 @@ PUB init | i, tv_mode
       resetSettings
       subsys.chirpHappy
       reboot
+
+  ' Init the auth object with some randomness
+  random.start
+  auth.init(random.random)
+  random.stop
+
+  ' Print out the MAC address on the TV
+  term.str(string("MAC: "))  
+  if settings.getData(settings#NET_MAC_ADDR,@stack,6)
+    repeat i from 0 to 5
+      if i
+        term.out("-")
+      term.hex(byte[@stack][i],2)
+    term.out(13)  
+  else
+    term.str(string("???",13))
 
   if not \websocket.start(1,2,3,4,6,7)
     showMessage(string("Unable to start networking!"))
