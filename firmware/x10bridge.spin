@@ -13,6 +13,11 @@ CON
 
   MAX_DEVICES       = 10                                ' maximum number of 1-wire devices
   OW_PIN = 30
+
+  X10_ZC_PIN = 26
+  X10_IN_PIN = 25
+  X10_OUT_PIN = 24
+  
 OBJ
 
   term          : "TV_Text"
@@ -121,9 +126,10 @@ PUB init | i
   subsys.chirpHappy
 
   if(!settings.findKey(settings#MISC_X10_HOUSE))
+    ' By default, use house 'H'
     settings.setByte(settings#MISC_X10_HOUSE,X10#HOUSE_H)
 
-  X10.start(26,25,24)
+  X10.start(X10_ZC_PIN,X10_IN_PIN,X10_OUT_PIN)
  
   repeat
     i:=\httpServer
@@ -300,7 +306,7 @@ pri httpOutputROMCode(p)
   repeat 8
     socket.hex(byte[p++],2)
    
-pri indexPage | i, tempF, tempC, p
+pri indexPage | i, p, count1, count2
   'term.str(string("Sending index page",13))
 
   socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>X10 Bridge</title>"))
@@ -311,6 +317,19 @@ pri indexPage | i, tempF, tempC, p
   socket.str(string("<p>Default House Code:"))
   socket.dec(settings.getByte(settings#MISC_X10_HOUSE))
   socket.str(string(" (Raw)</p>"))
+
+
+  waitpeq(0,|<X10_ZC_PIN,0)
+  waitpne(0,|<X10_ZC_PIN,0)
+  count1:=cnt
+  waitpeq(0,|<X10_ZC_PIN,0)
+  waitpne(0,|<X10_ZC_PIN,0)
+  count2:=cnt
+
+  socket.str(string("<p>Cycle Rate: "))
+  socket.str(fp.FloatToString(F.FDiv(F.FFloat(clkfreq),F.FFloat(count2-count1))))
+  socket.str(string("Hz</p>"))
+  
   httpOutputLink(string("/send?code=3"),string("green button"),string("Lights On"))
   socket.str(string("<br/>"))
   httpOutputLink(string("/send?unit=12&code=5"),string("green button"),string("Unit 1 On"))
