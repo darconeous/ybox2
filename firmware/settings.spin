@@ -72,6 +72,8 @@ CON { Keys for various stuff }
   MISC_TV_MODE       = "t"+("v"<<8) ' 1 byte, 0=NTSC, 1=PAL
   MISC_ONE_WIRE_BUS  = "1"+("w"<<8) ' Pin number for the one wire bus
 
+  MISC_X10_HOUSE     = "X"+("H"<<8) ' X10 House id (in raw wire format)
+
   MISC_STAGE2        = "2"+("2"<<8)
 
   MISC_STAGE2_SIZE   = "2"+("S"<<8)

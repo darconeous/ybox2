@@ -39,10 +39,10 @@ pri hash_append_byte(char)
   if hash_size & constant(hasher#BLOCK_LENGTH-1) == 0
     hasher.hashBlock(@hash_buffer,@hash_value)
 pri hash_append(ptr,len)
-  repeat while len--
+  repeat len
     hash_append_byte(BYTE[ptr++])
 pri hash_append_base16(ptr,len)
-  repeat while len--
+  repeat len
     hash_append_byte(base16.dec_to_base16(BYTE[ptr]>>4))
     hash_append_byte(base16.dec_to_base16(BYTE[ptr++]))
 pri hash_finish
