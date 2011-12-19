@@ -50,11 +50,13 @@ LED_B   byte 0
 modecog byte 0
 subsyscog byte 0
 lasterror byte 0
+inIRTest byte 0
+
 OBJ
   settings      : "settings"
   pause         : "pause"
 VAR
-  long stack[20] 'Stack space for new cog
+  long stack[30] 'Stack space for new cog
 PUB init | LED_Conf
   if \settings.getData(settings#MISC_LED_CONF,@LED_Conf,4) == 4
     ' We have custom LED settings!
@@ -87,11 +89,13 @@ PUB Stop
   if subsyscog
     cogstop(subsyscog~ - 1)
 PUB StatusOff
+  inIRTest := FALSE
   lasterror~
   if modecog
     cogstop(modecog~ - 1)
 PUB irTest
   StatusOff
+  inIRTest := TRUE
   modecog := cognew(irTestCycle, @stack) + 1 
 
 PRI irTestCycle
@@ -103,32 +107,47 @@ PRI irTestCycle
     SetColor(0,0,255)
 
 PUB StatusIdle
+  if inIRTest
+    return
   StatusOff
-  modecog := cognew(ColorCycle, @stack) + 1 
+  SetColor($2F,$2F,$2F)
+
+PUB StatusActivity
+  if inIRTest
+    return
+  StatusOff
+  SetColor($FF,$FF,$FF)
+  modecog := cognew(ActivityCycle, @stack) + 1 
+
 PUB StatusLoading
+  if inIRTest
+    return
   StatusOff
   modecog := cognew(LoadingCycle, @stack) + 1 
 
 PUB StatusFatalError
   StatusOff
   modecog := cognew(ErrorCycle, @stack) + 1 
+
 PUB StatusErrorCode(i)
   if lasterror <> i
     StatusOff
     lasterror := i
     modecog := cognew(ErrorCodeCycle(i), @stack) + 1  
+
 PUB FadeToColor(rB,gB,bB,dur)
   StatusOff
   modecog := cognew(FadeToColorBlocking(rB,gB,bB,dur), @stack) + 1
+
 PUB FadeToColorBlocking(rB,gB,bB,dur)|i,rA,gA,bA
   rA:=LED_R
   gA:=LED_G
   bA:=LED_B
-  dur:=(1<<15)/(dur*6+1)
+  dur:=(1<<23)/(dur*12+1)
   ifnot dur
     dur:=1
-  repeat i from 0 to (1<<15) step dur
-    SetColor((((rB-rA)*i)>>15)+rA,(((gB-gA)*i)>>15)+gA,(((bB-bA)*i)>>15)+bA)
+  repeat i from 0 to (1<<23) step dur
+    SetColor((((rB-rA)*i)>>23)+rA,(((gB-gA)*i)>>23)+gA,(((bB-bA)*i)>>23)+bA)
   SetColor(rB,gB,bB)
    
 pub ChirpHappy | i, j
@@ -177,6 +196,11 @@ PRI LoadingCycle
     FadeToColorBlocking(0,127,255,500)
     FadeToColorBlocking(0,0,0,500)
 
+PRI ActivityCycle
+  repeat
+    FadeToColorBlocking(255,255,255,30)
+    FadeToColorBlocking($3F,$3F,$3F,30)
+
 PRI ColorCycle
   ' Quicly fade to green
   FadeToColorBlocking(0,255,0,500)
@@ -208,14 +232,11 @@ run
               or dira,LEDRMask
               or dira,LEDGMask
               or dira,LEDBMask
-              'or dira,SPKRMask
 
-{
               ' Set up CTRA for the button watchdog.
               mov phsa,#0
               mov ctra,RSTCTR
               mov frqa,RSTFRQ
-}
 
               ' Set up RTCLAST for RTC
               rdlong RTCLAST,#0
@@ -223,7 +244,6 @@ run
               
 loop
 
-{
               ' If the button was released,
               ' reset the phase register.
               mov  T1,#1
@@ -236,7 +256,6 @@ loop
               ' than 5 seconds, then reset the board.
               cmp  RSTTIME,phsa wc
         if_c  clkset RSTCLK
-}
 
 LEDDutyLoop
 
@@ -244,7 +263,6 @@ LEDDutyLoop
               shl T1,LEDRBright
               add LEDRP,T1 wc
 LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
-'        if_nc jmp #:LEDROff
               or outa,LEDRMask
               jmp #:LEDRDone
 :LEDROff
@@ -255,7 +273,6 @@ LEDRJmp       long %010111_0001_0011_000000000_000000000 + :LEDROff
               shl T1,LEDGBright
               add LEDGP,T1 wc
 LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
-'        if_nc jmp #:LEDGOff
               or outa,LEDGMask
               jmp #:LEDGDone
 :LEDGOff
@@ -266,7 +283,6 @@ LEDGJmp       long %010111_0001_0011_000000000_000000000 + :LEDGOff
               shl T1,LEDBBright
               add LEDBP,T1 wc
 LEDBJmp       long %010111_0001_0011_000000000_000000000 + :LEDBOff
-'        if_nc jmp #:LEDBOff
               or outa,LEDBMask
               jmp #:LEDBDone
 :LEDBOff
@@ -300,7 +316,7 @@ SPKRMask      long (1 << SPKRPin)
 
 RSTCTR        long  %01000_111 << 23 + BTTNPin << 9 + 0
 RSTFRQ        long  1
-RSTTIME       long  5*80_000_0000
+RSTTIME       long  5*80_000_000
 RSTCLK        long  -1
 RTCPTR        long RTCADDR
 RTCLAST       res  1
