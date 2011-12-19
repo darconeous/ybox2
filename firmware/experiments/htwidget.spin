@@ -13,7 +13,11 @@ CON
   _clkmode = xtal1 + pll16x
   _xinfreq = 5_000_000
 
-  IR_PIN   = 25
+  X10_ZC_PIN = 26
+  X10_IN_PIN = 25
+  X10_OUT_PIN = 24
+  IR_PIN   = 27
+  
 OBJ
 
   term          : "TV_Text"
@@ -26,6 +30,7 @@ OBJ
   auth          : "auth_digest"
   sony_out      : "ir_transmit_sony"
   pause : "pause"
+  X10           : "X10"
                               
 VAR
   long stack[100] 
@@ -132,6 +137,12 @@ PUB init | i
 
   subsys.StatusIdle
   subsys.chirpHappy
+
+  if(!settings.findKey(settings#MISC_X10_HOUSE))
+    ' By default, use house 'H'
+    settings.setByte(settings#MISC_X10_HOUSE,X10#HOUSE_H)
+
+  X10.start(X10_ZC_PIN,X10_IN_PIN,X10_OUT_PIN)
  
   repeat
     i:=\httpServer
@@ -189,7 +200,7 @@ pri httpUnauthorized(authorized)
   socket.str(@CR_LF)
   socket.str(@HTTP_401)
 
-pub httpServer | char, i, contentLength,authorized,queryPtr, tmp1, tmp2, tmp3
+pub httpServer | char, i, contentLength,authorized,queryPtr, tmp1, tmp2, tmp3, house,code,unit
 
   repeat
     repeat while \socket.listen(80) == -1
@@ -210,7 +221,7 @@ pub httpServer | char, i, contentLength,authorized,queryPtr, tmp1, tmp2, tmp3
     http.parseRequest(socket.handle,@httpMethod,@httpPath)
     
     contentLength:=0
-    repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,128)
+    repeat while http.getNextHeader(socket.handle,@httpHeader,32,@buffer,256)
       if strcomp(@httpHeader,string("Content-Length"))
         contentLength:=numbers.fromStr(@buffer,numbers#DEC)
       elseif NOT authorized AND strcomp(@httpHeader,string("Authorization"))
@@ -366,6 +377,78 @@ pub httpServer | char, i, contentLength,authorized,queryPtr, tmp1, tmp2, tmp3
         socket.str(@CR_LF)
         subsys.irTest
         socket.str(string("OK",13,10))
+      elseif strcomp(@httpPath,string("/poweroff"))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.txmimeheader(string("Refresh"),string("0;url=/"))        
+        socket.str(@CR_LF)
+
+        repeat 4
+          sony_out.sendCode(sony_out#CMD_PWR_OFF,sony_out#ADDR_TV)
+        X10.send(settings.getByte(settings#MISC_X10_HOUSE),1)
+      elseif strcomp(@httpPath,string("/poweron"))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.txmimeheader(string("Refresh"),string("0;url=/"))        
+        socket.str(@CR_LF)
+
+        repeat 4
+          sony_out.sendCode(sony_out#CMD_PWR_ON,sony_out#ADDR_TV)
+        X10.send(settings.getByte(settings#MISC_X10_HOUSE),3)
+      
+      elseif strcomp(@httpPath,string("/sendx10"))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.txmimeheader(string("Refresh"),string("0;url=/"))        
+        socket.str(@CR_LF)
+        house := settings.getByte(settings#MISC_X10_HOUSE)
+        code := -1
+        unit := -1
+        tmp1 := -1
+        tmp2 := -1
+        
+        if http.getFieldFromQuery(queryPtr,string("house"),@buffer,10)
+          house:=atoi(@buffer)
+        socket.str(string(" house="))
+        socket.dec(house)
+        if http.getFieldFromQuery(queryPtr,string("unit"),@buffer,10)
+          unit:=atoi(@buffer)
+          socket.str(string(" unit="))
+          socket.dec(unit)
+        if http.getFieldFromQuery(queryPtr,string("code"),@buffer,10)
+          code:=atoi(@buffer)
+          socket.str(string(" code="))
+          socket.dec(code)
+          if (unit <> -1)
+            X10.send_to_unit(house,unit,code)
+          else
+            X10.send(house,code)
+          socket.str(string(" SENT"))
+        elseif http.getFieldFromQuery(queryPtr,string("extcmd"),@buffer,10)
+          code:=atoi(@buffer)
+          if http.getFieldFromQuery(queryPtr,string("data"),@buffer,10)
+            tmp1:=atoi(@buffer)
+          socket.str(string(" extcmd="))
+          socket.dec(code)
+          socket.str(string(" data="))
+          socket.dec(tmp1)
+          X10.send_ext_to_unit(house,unit,code,tmp1)
+          socket.str(string(" SENT"))
+
+        if http.getFieldFromQuery(queryPtr,string("dim"),@buffer,10)
+          tmp2:=atoi(@buffer)
+          socket.str(string(" dim="))
+          socket.dec(tmp2)
+          X10.dim(house,tmp2)
+          socket.str(string(" SENT"))
+        if http.getFieldFromQuery(queryPtr,string("bright"),@buffer,10)
+          tmp2:=atoi(@buffer)
+          socket.str(string(" bright="))
+          socket.dec(tmp2)
+          X10.bright(house,tmp2)
+          socket.str(string(" SENT"))
+          
+        socket.str(@CR_LF)
       else           
         term.str(string("404",13))
         socket.str(@HTTP_404)
@@ -395,7 +478,7 @@ pri httpOutputLink(url,class,content)
 pri indexPage | i
   'term.str(string("Sending index page",13))
 
-  socket.str(string("<html><head><meta name='viewport' content='width=320' /><title>ybox2</title>"))
+  socket.str(string("<html><head manifest='http://www.deepdarc.com/ybox2.manifest'><meta name='viewport' content='width=320' /><meta name='apple-mobile-web-app-capable' content='yes'><title>ybox2</title>"))
   socket.str(string("<link rel='stylesheet' href='http://www.deepdarc.com/ybox2.css' />"))
   socket.str(string("</head><body><h1>"))
   socket.str(@productName)
@@ -435,20 +518,37 @@ pri indexPage | i
   }
    
   socket.str(string("<h2>Actions</h2>"))
-  socket.str(string("<h3>TV</h3>"))
-  socket.str(string("<p>"))
-  httpOutputLink(string("/sony?cmd=46&addr=1"),string("white button"),string("Power On"))
+
+  socket.str(string("<h3>Lights</h3><p>"))
+  httpOutputLink(string("sendx10?code=3"),string("green button"),string("All Lights On"))
   socket.str(string("</p><p>"))
-  httpOutputLink(string("/sony?cmd=47&addr=1"),string("white button"),string("Power Off"))
+  httpOutputLink(string("sendx10?code=13"),string("red button"),string("All Lights Off"))
   socket.str(string("</p><p>"))
-  httpOutputLink(string("sony?cmd=64&addr=1"),string("white button"),string("Digital Cable"))
+  httpOutputLink(string("sendx10?unit=28&code=5"),string("green button"),string("Track Lights On"))
   socket.str(string("</p><p>"))
-  httpOutputLink(string("sony?cmd=65&addr=1"),string("white button"),string("ybox2"))
+  httpOutputLink(string("sendx10?unit=28&code=7"),string("red button"),string("Track Lights Off"))
   socket.str(string("</p><p>"))
-  httpOutputLink(string("sony?cmd=54&addr=164"),string("white button"),string("DVD Player"))
+  ' 14 levels
+  httpOutputLink(string("sendx10?unit=28&bright=1"),string("green button"),string("Track Lights Brighter"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("sendx10?unit=28&dim=1"),string("red button"),string("Track Lights Dimmer"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("sendx10?unit=28&code=5&dim=14&bright=5"),string("yellow button"),string("Track Lights Mood"))
+
+  socket.str(string("</p><h3>TV</h3><p>"))
+  httpOutputLink(string("sony?cmd=46&addr=1"),string("green button"),string("TV On"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("sony?cmd=47&addr=1"),string("red button"),string("TV Off"))
+  socket.str(string("</p><h3>TV Input</h3><p>"))
+  httpOutputLink(string("sony?cmd=64&addr=1"),string("white button"),string("ybox2"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("sony?cmd=65&addr=1"),string("white button"),string("Video 2"))
+  socket.str(string("</p><p>"))
+  httpOutputLink(string("sony?cmd=54&addr=164"),string("white button"),string("Cable Box"))
   socket.str(string("</p><p>"))
   httpOutputLink(string("sony?cmd=55&addr=164"),string("white button"),string("Mac mini"))
   socket.str(string("</p>"))
+
   socket.str(string("<h3>LED</h3>"))
   socket.str(string("<p>"))
   httpOutputLink(string("/led?ff0000"),string("red button"),string("Red"))
@@ -462,9 +562,15 @@ pri indexPage | i
   httpOutputLink(string("/led_rainbow"),string("white button"),string("Rainbow"))
   socket.str(string("</p><p>"))
   httpOutputLink(string("/irtest"),string("white button"),string("IR Test"))
-  socket.str(string("</p>"))
-  socket.str(string("<h3>System</h3>"))
+
+  socket.str(string("</p><h3>All</h3><p>"))
+  httpOutputLink(string("/poweron"),string("green button"),string("All On"))
   socket.str(string("</p><p>"))
+  httpOutputLink(string("/poweroff"),string("red button"),string("All Off"))
+
+
+  socket.str(string("<h3>System</h3>"))
+  socket.str(string("<p>"))
   httpOutputLink(string("/reboot"),string("black button"),string("Reboot"))
   socket.str(string("</p>"))
   

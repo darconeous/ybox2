@@ -31,7 +31,7 @@ OBJ
   X10           : "X10"
   fp            : "FloatString"
   f             : "FloatMath"                           ' could also use Float32
-                                   
+  pause         : "pause"                                 
 VAR
   long stack[100] 
   byte stage_two
@@ -249,7 +249,21 @@ pub httpServer | char, i, contentLength,authorized,queryPtr,house,unit,code
         socket.close
         delay_ms(100)
         reboot
-      elseif strcomp(@httpPath,string("/send"))
+      elseif strcomp(@httpPath,string("/hertz"))
+        socket.str(@HTTP_200)
+        socket.str(@HTTP_CONNECTION_CLOSE)
+        socket.str(@CR_LF)
+        repeat 30
+          if !socket.isConnected
+            next
+          socket.dec(subsys.uptime)
+          socket.str(string(", "))
+          socket.str(fp.FloatToString(calc_cycle_rate))
+          socket.str(@CR_LF)
+          pause.delay_s(1)
+          if !socket.isConnected
+            next
+      elseif strcomp(@httpPath,string("/sendx10"))
         socket.str(@HTTP_200)
         socket.str(@HTTP_CONNECTION_CLOSE)
         socket.txmimeheader(string("Refresh"),string("0;url=/"))        
@@ -305,6 +319,14 @@ pri httpOutputLink(url,class,content)
 pri httpOutputROMCode(p)
   repeat 8
     socket.hex(byte[p++],2)
+pri calc_cycle_rate | count1, count2
+  waitpeq(0,|<X10_ZC_PIN,0)
+  waitpne(0,|<X10_ZC_PIN,0)
+  count1:=cnt
+  waitpeq(0,|<X10_ZC_PIN,0)
+  waitpne(0,|<X10_ZC_PIN,0)
+  count2:=cnt
+  return F.FDiv(F.FFloat(clkfreq),F.FFloat(count2-count1))
    
 pri indexPage | i, p, count1, count2
   'term.str(string("Sending index page",13))
@@ -319,15 +341,9 @@ pri indexPage | i, p, count1, count2
   socket.str(string(" (Raw)</p>"))
 
 
-  waitpeq(0,|<X10_ZC_PIN,0)
-  waitpne(0,|<X10_ZC_PIN,0)
-  count1:=cnt
-  waitpeq(0,|<X10_ZC_PIN,0)
-  waitpne(0,|<X10_ZC_PIN,0)
-  count2:=cnt
 
   socket.str(string("<p>Cycle Rate: "))
-  socket.str(fp.FloatToString(F.FDiv(F.FFloat(clkfreq),F.FFloat(count2-count1))))
+  socket.str(fp.FloatToString(calc_cycle_rate))
   socket.str(string("Hz</p>"))
   
   httpOutputLink(string("/send?code=3"),string("green button"),string("Lights On"))
