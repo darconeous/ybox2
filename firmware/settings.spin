@@ -3,15 +3,15 @@
         Robert Quattlebaum <darco@deepdarc.com>
         PUBLIC DOMAIN
         
-        This object handles the storage and retreval of variables
+        This object handles the storage and retrieval of variables
         and data which need to persist across power cycles.
 
-        By default requires a 64KB EEPROM to save things persistantly.
+        By default requires a 64KB EEPROM to save things persistently.
         You can make it work with a 32KB EEPROM by changing the
         EEPROMOffset constant to zero.
 
         Also, since it is effectively a "singleton" type of object,
-        it allows for some rudamentry cross-object communication.
+        it allows for some rudimentary cross-object communication.
         It is not terribly fast though, so it should be read-from
         and written-to sparingly.
 
@@ -38,7 +38,7 @@
         without any obvious benefit.
 
         Limitations/implications:
-          * The maxumum data size is 255 bytes.
+          * The maximum data size is 255 bytes.
           * Zero-length entries are valid.
           * The key value of zero is reserved.
           * Two entries cannot have the same key.
@@ -57,13 +57,13 @@
 CON { Tweakable parameters }
   SettingsSize = $400
   EEPROMOffset = $8000 ' Change to zero if you want to use with a 32KB EEPROM
+  EEPROMPageSize = 128 ' May need to be 64 for some EEPROM devices
 
-CON { Non-tweakable constants}
-  EEPROMPageSize = 128
+CON { Non-tweakable constants }
   SettingsTop = $8000 - 1
   SettingsBottom = SettingsTop - (SettingsSize-1)
 
-CON { Keys for various stuff }
+CON { Keys for various stuff (Mostly ybox2 specific) }
   MISC_UUID          = "i"+("d"<<8)
   MISC_PASSWORD      = "p"+("w"<<8)
   MISC_AUTOBOOT      = "a"+("b"<<8)
