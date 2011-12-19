@@ -62,37 +62,43 @@ PUB setcommand(cmd, arg0_, arg1_):startCnt
 PUB bootstrapFromEEPROM(addr_,size)|device
   reset
   device := EEPROM | (addr_ >> 15 & %1110)
-  repeat while setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
+  repeat while setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),device|Xmit,0)
   setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
   setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
-  setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Recv,0)
-  setcommand(CMD_READ|CMD_BOOTSTRAP,0,size)
-
-PUB blockRead(destaddr,addr_,count): ackBit|device
+  setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),device|Recv,0)
+  setcommand(constant(CMD_READ|CMD_BOOTSTRAP),0,size)
+  
+PUB blockReadDevice(device,destaddr,addr_,count): ackBit
   reset
-  device := EEPROM | (addr_ >> 15 & %1110)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
+  device |= (addr_ >> 15 & %1110)
+  ackbit := (ackbit << 1) | setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),device|Xmit,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[1],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,addr_.byte[0],0)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Recv,0)
-  ackbit := (ackbit << 1) | setcommand(CMD_READ|CMD_END,destaddr,count)
+  ackbit := (ackbit << 1) | setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),device|Recv,0)
+  ackbit := (ackbit << 1) | setcommand(constant(CMD_READ|CMD_END),destaddr,count)
   if ackbit
     abort ackbit
-PUB blockWrite(srcaddr,destaddr,count): ackBit|device
+PUB blockRead(destaddr,addr_,count): ackBit|device
+  blockReadDevice(EEPROM,destaddr,addr_,count)
+  
+PUB blockWriteDevice(device,srcaddr,destaddr,count): ackBit
   reset
-  device := EEPROM | (destaddr >> 15 & %1110)
-  ackbit := (ackbit << 1) | setcommand(CMD_BEGIN|CMD_WRITE_BYTE,device|Xmit,0)
+  device |= (destaddr >> 15 & %1110)
+  ackbit := (ackbit << 1) | setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),device|Xmit,0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[1],0)
   ackbit := (ackbit << 1) | setcommand(CMD_WRITE_BYTE,destaddr.byte[0],0)
-  ackbit := (ackbit << 1) | setcommand(CMD_WRITE|CMD_END,srcaddr,count)
+  ackbit := (ackbit << 1) | setcommand(constant(CMD_WRITE|CMD_END),srcaddr,count)
 
   if ackbit
     abort ackbit
+
+PUB blockWrite(srcaddr,destaddr,count): ackBit|device
+  blockWriteDevice(EEPROM,srcaddr,destaddr,count)
 PUB reset
   ifnot cog
     _start
-  setcommand(CMD_BEGIN|CMD_WRITE_BYTE,$FF,0)
-  setcommand(CMD_BEGIN|CMD_END,0,0)
+  setcommand(constant(CMD_BEGIN|CMD_WRITE_BYTE),$FF,0)
+  setcommand(constant(CMD_BEGIN|CMD_END),0,0)
  
 PUB busy:isBusy
   reset
