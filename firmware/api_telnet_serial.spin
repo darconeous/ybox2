@@ -9,37 +9,38 @@ VAR
 
 PUB start(cs, sck, si, so, int, xtalout)
   _handle:=-1
+  listening:=0
+  listenport:=0
   return tcp.start(cs, sck, si, so, int, xtalout)
 
 PUB stop
-
   tcp.stop
+
 PUB handle
   return _handle
-PUB connect(ip, remoteport, localport)
 
+PUB connect(ip, remoteport, localport)
   listening := false
   close
+
   return (_handle := tcp.connect(ip, remoteport, localport))
 
 PUB listen(port)
-
   listenport := port
   listening := true
   close
-  return (_handle := tcp.listen(listenport))
+  _handle := tcp.listen(listenport)
+  return _handle
 
 PUB isConnected
-
   if _handle=>0
     return tcp.isConnected(_handle)
-  return FALSE
-PUB isEOF
+  return false
 
+PUB isEOF
   return tcp.isEOF(_handle)
 
 PUB waitConnectTimeout(ms) | t
-
   t := cnt
   repeat until isConnected or (((cnt - t) / (clkfreq / 1000)) > ms)
     if listening
@@ -48,32 +49,32 @@ PUB waitConnectTimeout(ms) | t
   return isConnected
   
 PUB close
-
   if _handle=>0
-    tcp.close(_handle)
+    \tcp.close(_handle)
     _handle:=-1
-PUB closeAll
 
-  tcp.closeAll
+PUB closeAll
+  listening:=0
+  listenport:=0
   _handle:=-1
+  \tcp.closeAll
 
 PUB rxflush
-
   repeat while rxcheck => 0
 
 PUB rxcheck
-
   if listening
     if tcp.isEOF(_handle)
       listen(listenport)
-
   return tcp.readByteNonBlocking(_handle)
+
 {
 PUB rxdata(ptr,len)
   if isConnected
     return tcp.readData(handle,ptr,len)
   return -1
 }
+
 PUB rxtime(ms) : rxbyte
   rxbyte:=-1
   if _handle=>0
@@ -83,11 +84,9 @@ PUB rx
   return tcp.readByte(_handle)
 
 PUB txcheck(txbyte)
-
   if listening
     ifnot tcp.isValidHandle(_handle)
       listen(listenport)
-
   return tcp.writeByteNonBlocking(_handle, txbyte)
   
 PUB tx(txbyte)
@@ -113,17 +112,17 @@ PUB txurl(txbyte)
     other:
       tx(txbyte)
 
-PUB str(stringptr)                
+PUB str(stringptr)
   txdata(stringptr,strsize(stringptr))
 
-PUB strurl(stringptr)                
-
+PUB strurl(stringptr)
   repeat strsize(stringptr)
-    txurl(byte[stringptr++])    
-PUB strxml(stringptr)                
+    txurl(byte[stringptr++])
 
+PUB strxml(stringptr) 
   repeat strsize(stringptr)
     txxml(byte[stringptr++])    
+
 PUB txip(ip_ptr)
   dec(byte[ip_ptr][0])
   tx(".")
@@ -132,15 +131,15 @@ PUB txip(ip_ptr)
   dec(byte[ip_ptr][2])
   tx(".")
   dec(byte[ip_ptr][3])
+
 PUB txmimeheader(name,value)
   str(name)
   str(string(": "))
   str(value)
   str(string(13,10))
+
 PUB dec(value) | i
-
 '' Print a decimal number
-
   if value < 0
     -value
     tx("-")
@@ -157,7 +156,6 @@ PUB dec(value) | i
     i /= 10
 
 PUB readDec | i,char, retVal
-
   retVal:=0
   repeat 8
     case (char := rx)
@@ -168,20 +166,17 @@ PUB readDec | i,char, retVal
           return retVal
       OTHER:
         return retVal
-  return retVal 
+  return retVal
+
 PUB hex(value, digits)
-
 '' Print a hexadecimal number
-
   value <<= (8 - digits) << 2
   repeat digits
     tx(lookupz((value <-= 4) & $F : "0".."9", "A".."F"))
 
 
 PUB bin(value, digits)
-
 '' Print a binary number
-
   value <<= 32 - digits
   repeat digits
     tx((value <-= 1) & 1 + "0")

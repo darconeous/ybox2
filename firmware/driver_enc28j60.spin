@@ -202,7 +202,8 @@ PUB start(_cs, _sck, _si, _so, _int, xtalout, macptr)
   init_ENC28J60
 
   ' write mac address to the chip
-  setMACAddress(macptr)
+  if(macptr)
+    setMACAddress(macptr)
 
   'heap_init
 

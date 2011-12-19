@@ -27,6 +27,7 @@ OBJ
   random   : "RealRandom"
   settings : "settings"
   q : "qring"
+  pause : "pause"
 
 CON
   _clkmode = xtal1 + pll16x
@@ -84,6 +85,8 @@ PUB start(cs, sck, si, so, int, xtalout) : okay
   stop
   q.init
 
+  bytefill(@sSockets,0,sSocketBytes*sNumSockets)
+  
   if(SocketLockID := locknew) == -1
     abort FALSE
   
@@ -124,10 +127,10 @@ PRI engine(cs, sck, si, so, int, xtalout) | i
 
   repeat
     ifnot nic.isLinkUp
-      repeat while NOT nic.isLinkUp
+      repeat while NOT nic.isLinkUp   ' Spin until link is re-established
       dhcp_rebind
 
-    if (i & 3) == 0
+    if (i & 3) == 0     ' Every 4 loops, hit dhcp just in case
       dhcp_process
       
     if nic.rxPacketCount
@@ -337,10 +340,10 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
 
   if (handle := \find_socket(srcip, dstport, srcport))==-1
     ' If this is a syn packet and we have listened on this
-    ' port in the past 5 seconds then just drop the packet.
+    ' port in the past 10 seconds then just drop the packet.
     ' Hopefully we'll be listening again on that port at
     ' some point in the near future.
-    ifnot (dstport==last_listen_port) AND (LONG[RTCADDR]<last_listen_time+5) AND ((BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN))
+    ifnot (dstport==last_listen_port) AND (LONG[RTCADDR]<last_listen_time+10) AND ((BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_SYN))
       reject_tcp
     abort -1
   handle_addr := @sSockets + (sSocketBytes * handle)
@@ -418,9 +421,8 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     last_listen_time:=long[RTCADDR]
    
   elseif (BYTE[handle_addr + sConState] <> SLISTEN) AND (BYTE[pkt][constant(TCP_hdrflags + 1)] & TCP_FIN) > 0
-    ' Reply to FIN with ACK
       
-    ' We only want to ACK a FIN if we have received everything up to this point.
+    ' We only want to ACK a FIN if we haven't received everything up to this point.
     if seq<>LONG[handle_addr + sMyAckNum]
       send_tcppacket(handle_addr,TCP_ACK,0,0)
       abort -1 ' Bad sequence Num!
@@ -456,7 +458,6 @@ PRI handle_tcp | i, ptr, handle, handle_addr, srcip, dstip, dstport, srcport, da
     BYTE[handle_addr + sConState] := SCLOSED
 
 PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
-  bounce_unreachable(3)
 
   dstport := BYTE[pkt][TCP_destport] << 8 + BYTE[pkt][constant(TCP_destport + 1)]
   srcport := BYTE[pkt][TCP_srcport] << 8 + BYTE[pkt][constant(TCP_srcport + 1)]
@@ -476,7 +477,9 @@ PRI reject_tcp | srcip,dstport,srcport,seq,ack,chksum
   nic.calc_frame_ip_checksum
   nic.calc_frame_tcp_checksum
 
-  return nic.send_frame
+  nic.send_frame
+
+  bounce_unreachable(3)
 
 
 PRI compose_tcp_header(dstport,srcport,seq,ack,flags,window,chksum)
@@ -543,7 +546,7 @@ PRI find_socket(srcip, dstport, srcport) | handle, free_handle, handle_addr
   if free_handle <> -1
     return free_handle 
   else
-    abort(-1)
+    abort ERR_TCP_SOCKET_NOT_FOUND
 
 ' ******************************
 ' ** Transmit Buffer Handlers **
@@ -555,9 +558,12 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
     handle_addr := @sSockets + (sSocketBytes * handle)
     state := BYTE[handle_addr + sConState]
 
+    if (state == SLISTEN) OR (state == SCLOSED)
+      next
+
     if state == SESTABLISHED OR state == SCLOSING
       ' Check to see if we have data to send, if we do, send it
-      ' If we have hit out next ack marker, send an ACK
+      ' If we have hit our next ack marker, send an ACK
 
       i := local_mtu-TCP_DATA
       if WORD[handle_addr+sDstWindow]<i
@@ -587,7 +593,7 @@ PRI tick_tcpsend | state,i, ptr, handle, handle_addr
 
       send_tcppacket(handle_addr,TCP_ACK|TCP_FIN,0,0)
 
-      ' set socket state, now free
+      ' set socket state, move to 'closing2' state.
       LONG[handle_addr + sAge] := long[RTCADDR]
       BYTE[handle_addr + sConState] := SCLOSING2
     elseif state == SCLOSING2 AND (long[RTCADDR]-LONG[handle_addr + sAge]>10)
@@ -696,7 +702,7 @@ PUB listen(port) | handle, handle_addr, x
   
   if handle < 0
     socketunlock
-    return -1
+    abort ERR_TCP_NO_MORE_SOCKETS
 
   handle_addr := @sSockets + (sSocketBytes * handle)
 
@@ -707,14 +713,14 @@ PUB listen(port) | handle, handle_addr, x
 
   if (x:=\q.new)=<0
     socketunlock
-    return -1
+    abort x
   else
     BYTE[handle_addr + sSockQTx] := x
     
   if (x:=\q.new)=<0
     \q.delete(BYTE[handle_addr + sSockQTx]~)
     socketunlock
-    return -1
+    abort x
   else
     BYTE[handle_addr + sSockQRx] := x
 
@@ -739,7 +745,7 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
 
   if handle < 0
     socketunlock
-    return -1
+    abort ERR_TCP_NO_MORE_SOCKETS
 
   handle_addr := @sSockets + (sSocketBytes * handle)
 
@@ -748,14 +754,14 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
   
   if (x:=\q.new)=<0
     socketunlock
-    return -1
+    abort x
   else
     BYTE[handle_addr + sSockQTx] := x
     
   if (x:=\q.new)=<0
     \q.delete(BYTE[handle_addr + sSockQTx]~)
     socketunlock
-    return -1
+    abort x
   else
     BYTE[handle_addr + sSockQRx] := x
 
@@ -774,32 +780,36 @@ PUB connect(ip, remoteport, localport) | handle, handle_addr,x
 
 PUB close(handle) | handle_addr
 '' Closes a connection
+  if (handle => sNumSockets) OR (handle < 0)
+    abort ERR_TCP_BAD_HANDLE
   socketlock
   handle_addr := @sSockets + (sSocketBytes * handle)
-  if \isConnected(handle) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
+  if (\isConnected(handle)==true) OR BYTE[handle_addr + sConState]==SCLOSING OR BYTE[handle_addr + sConState]==SCLOSING2
     BYTE[handle_addr + sConState] := SCLOSING
     LONG[handle_addr + sAge] := long[RTCADDR]
     tcp_send_pending~~
-    repeat while BYTE[handle_addr + sConState]==SCLOSING
-    \q.delete(BYTE[handle_addr + sSockQTx]~)
-    \q.delete(BYTE[handle_addr + sSockQRx]~)
-  else
-    \q.delete(BYTE[handle_addr + sSockQTx]~)
-    \q.delete(BYTE[handle_addr + sSockQRx]~)
-    bytefill(handle_addr,0,sSocketBytes-1)
-    LONG[handle_addr + sAge] := long[RTCADDR]
-    BYTE[handle_addr + sConState] := SCLOSED
+    repeat 10
+      if BYTE[handle_addr + sConState]==SCLOSED
+        quit
+      \pause.delay_ms(100)
+
+  \q.delete(BYTE[handle_addr + sSockQTx]~)
+  \q.delete(BYTE[handle_addr + sSockQRx]~)
+  bytefill(handle_addr,0,sSocketBytes-1)
+  LONG[handle_addr + sAge] := long[RTCADDR]
+
   socketunlock
 
 PUB closeall | handle
   repeat handle from 0 to constant(sNumSockets - 1)
-    close(handle)
+    \close(handle)
+  bytefill(@sSockets,0,sSocketBytes*sNumSockets)
   q.reset
     
 PUB isConnected(handle) | handle_addr
 '' Returns true if the socket is connected, false otherwise
   if (handle => sNumSockets) OR (handle < 0)
-    abort -111
+    return false
   handle_addr := @sSockets + (sSocketBytes * handle)
   if BYTE[handle_addr + sConState] == SESTABLISHED
     return true
@@ -825,7 +835,7 @@ PUB readByteNonBlocking(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will not block (returns q#ERR_Q_EMPTY if no byte avail)
 
-  if (rxbyte:=\q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])) < 0 AND rxbyte<>q#ERR_Q_EMPTY
+  if ((rxbyte:=\q.pull(BYTE[@sSockets + (sSocketBytes * handle) + sSockQRx])) < 0) AND (rxbyte<>q#ERR_Q_EMPTY)
     abort rxbyte  
     
 PUB readByteTimeout(handle,ms) : rxbyte | ptr,t
@@ -834,13 +844,17 @@ PUB readByteTimeout(handle,ms) : rxbyte | ptr,t
 '' or a timeout occurs
 
   t := cnt
-  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
+  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY
+    ifnot isValidHandle(handle)
+      abort ERR_TCP_BAD_HANDLE
     if (cnt - t) / (clkfreq / 1000) > ms
       abort q#ERR_Q_EMPTY
 PUB readByte(handle) : rxbyte | ptr
 '' Read a byte from the specified socket
 '' Will block until a byte is received
-  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY AND isValidHandle(handle)
+  repeat while (rxbyte := readByteNonBlocking(handle)) == q#ERR_Q_EMPTY
+    ifnot isValidHandle(handle)
+      abort ERR_TCP_BAD_HANDLE
 
 PUB writeByteNonBlocking(handle, txbyte):retVal | ptr
 '' Writes a byte to the specified socket
@@ -850,28 +864,26 @@ PUB writeByteNonBlocking(handle, txbyte):retVal | ptr
     abort retVal  
   if retVal>0
     tcp_send_pending~~
-
-PUB writeDataNonBlocking(handle, ptr,len):retVal
-'' Writes a byte to the specified socket
-'' Will not block (returns q#ERR_Q_FULL if no buffer space available)
-
-  if (retVal:=\q.pushData(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],ptr,len)) < 0 AND retVal<>q#ERR_Q_FULL
-    abort retVal  
-  if retVal>0
-    tcp_send_pending~~
-  
 PUB writeByte(handle, txbyte):retVal
 '' Write a byte to the specified socket
 '' Will block until space is available for byte to be sent 
 
   repeat while (retVal:=writeByteNonBlocking(handle, txbyte)) == q#ERR_Q_FULL
     ifnot isValidHandle(handle)
-      abort -1
+      abort ERR_TCP_BAD_HANDLE
+
+PUB writeDataNonBlocking(handle, ptr,len):retVal
+'' Writes a byte to the specified socket
+'' Will not block (returns q#ERR_Q_FULL if no buffer space available)
+  if (retVal:=\q.pushData(BYTE[@sSockets + (sSocketBytes * handle) + sSockQTx],ptr,len)) < 0 AND retVal<>q#ERR_Q_FULL
+    abort retVal  
+  if retVal>0
+    tcp_send_pending~~
 
 PRI writeData_(handle, ptr,len): retVal
   repeat while (retVal:=writeDataNonBlocking(handle, ptr,len)) == q#ERR_Q_FULL
     ifnot isValidHandle(handle)
-      abort -1
+      abort ERR_TCP_BAD_HANDLE
 
 PUB writeData(handle, ptr,len)
   repeat while len > constant(q#Q_SIZE-1)
@@ -879,6 +891,11 @@ PUB writeData(handle, ptr,len)
     ptr+=constant(q#Q_SIZE-1)
     len-=constant(q#Q_SIZE-1)
   return writeData_(handle,ptr,len)
+
+CON
+    ERR_TCP_SOCKET_NOT_FOUND = -9
+    ERR_TCP_BAD_HANDLE = -10
+    ERR_TCP_NO_MORE_SOCKETS = -11
 
 CON
 ' The following is an 'array' that represents all the socket handle data (with respect to the remote host)
