@@ -2,6 +2,26 @@
   MD5 Hash in Spin
   Written by Robert Quattlebaum <darco@deepdarc.com>
   Adapted from pseudo code from http://en.wikipedia.org/wiki/MD5.
+
+  This code is hereby released into the PUBLIC DOMAIN. In jurisdictions where this
+  is not legally possible, this code is released under the "MIT license":
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of
+    this software and associated documentation files (the "Software"), to deal in
+    the Software without restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+    Software, and to permit persons to whom the Software is furnished to do so, subject
+    to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies
+    or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+    OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 }}
 CON { Public Constants }
   HASH_LENGTH = 16 ' An MD5 hash is 16 bytes long
@@ -43,20 +63,22 @@ PUB hashStart(h)
   
 PUB hashBlock(dataptr,h)|i,a,b,c,d,f,g,tmp
   longmove(@a,h,constant(HASH_LENGTH/4))
-  repeat i from 0 to 63
-    case i
-      0 .. 15:
-        f := (b & c) | ((! b) & d)
-        g := i
-      16 .. 31:
-        f := (d & b) | ((! d) & c)
-        g := (5*i + 1) & 15
-      32 .. 47:
-        f := b ^ c ^ d
-        g := (3*i + 5) & 15
-      48 .. 63:
-        f := c ^ (b | (! d))
-        g := (7*i) & 15
+
+  repeat i from 0 to 15
+    f := (b & c) | ((! b) & d)
+    g := i
+
+  repeat i from 16 to 31
+    f := (d & b) | ((! d) & c)
+    g := (5*i + 1) & 15
+
+  repeat i from 32 to 47
+    f := b ^ c ^ d
+    g := (3*i + 5) & 15
+
+  repeat i from 48 to 63
+    f := c ^ (b | (! d))
+    g := (7*i) & 15
 
     tmp := d
     d := c
@@ -85,21 +107,3 @@ PUB hashFinish(dataptr,datalen,totallen,h)|a[BLOCK_LENGTH/4]
   longfill(@a,0,constant(BLOCK_LENGTH/4))
 PUB hashName
   return hash_name
-CON
-{{
-┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                   TERMS OF USE: MIT License                                                  │                                                            
-├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation    │ 
-│files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,    │
-│modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software│
-│is furnished to do so, subject to the following conditions:                                                                   │
-│                                                                                                                              │
-│The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.│
-│                                                                                                                              │
-│THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE          │
-│WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR         │
-│COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,   │
-│ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                         │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-}}
